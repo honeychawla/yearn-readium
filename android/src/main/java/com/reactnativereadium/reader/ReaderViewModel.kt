@@ -138,15 +138,11 @@ class ReaderViewModel(
         class Failure(val error: UserException) : Event()
         class LocatorUpdate(val locator: Locator) : Event()
         class TableOfContentsLoaded(val toc: List<Link>) : Event()
-        class DecorationTapped(
-            val decorationId: String,
-            val locator: Locator,
-            val style: String
-        ) : Event()
         class TextSelected(
             val selectedText: String,
             val locator: Locator
         ) : Event()
+        // TODO: Add DecorationTapped once we implement tap handling
     }
 
     sealed class FeedbackEvent {

@@ -24,8 +24,7 @@ import androidx.lifecycle.lifecycleScope
 import org.readium.r2.navigator.epub.EpubNavigatorFragment
 import org.readium.r2.navigator.ExperimentalDecorator
 import org.readium.r2.navigator.Navigator
-import org.readium.r2.navigator.Decoration
-import org.readium.r2.navigator.SelectableNavigator
+import org.readium.r2.navigator.DecorableNavigator
 import org.readium.r2.navigator.epub.EpubPreferences
 import org.readium.r2.navigator.epub.EpubPreferencesSerializer
 import org.readium.r2.shared.publication.Locator
@@ -35,7 +34,7 @@ import org.readium.r2.shared.ReadiumCSSName
 @OptIn(ExperimentalDecorator::class)
 class EpubReaderFragment : VisualReaderFragment(), EpubNavigatorFragment.Listener {
 
-    override lateinit var model: ReaderViewModel
+    public override lateinit var model: ReaderViewModel
     override lateinit var navigator: Navigator
     private lateinit var publication: Publication
     lateinit var navigatorFragment: EpubNavigatorFragment
@@ -99,10 +98,8 @@ class EpubReaderFragment : VisualReaderFragment(), EpubNavigatorFragment.Listene
                 initialLocator = model.initialLocation,
                 listener = this,
                 config = EpubNavigatorFragment.Configuration().apply {
-                    // Register the HTML template for our custom [DecorationStyleAnnotationMark].
-                    // TODO: remove?
-                    /* decorationTemplates[DecorationStyleAnnotationMark::class] = annotationMarkTemplate(activity) */
-                    /* selectionActionModeCallback = customSelectionActionModeCallback */
+                    // Custom text selection callback to add "Highlight" action
+                    selectionActionModeCallback = createSelectionActionCallback()
                 }
             )
 
@@ -132,42 +129,19 @@ class EpubReaderFragment : VisualReaderFragment(), EpubNavigatorFragment.Listene
         // Observe and apply user decorations
         viewLifecycleOwner.lifecycleScope.launch {
             model.userDecorations.collect { decorations ->
-                navigatorFragment.applyDecorations(
+                (navigator as? DecorableNavigator)?.applyDecorations(
                     decorations = decorations,
                     group = "user-highlights"
                 )
             }
         }
 
-        // Register decoration tap observer
-        navigatorFragment.addDecorationObserver("user-highlights") { event ->
-            when (event) {
-                is Decoration.Event.OnActivated -> {
-                    val decoration = event.decoration
-                    viewLifecycleOwner.lifecycleScope.launch {
-                        model.channel.send(
-                            ReaderViewModel.Event.DecorationTapped(
-                                decorationId = decoration.id,
-                                locator = decoration.locator,
-                                style = when (decoration.style) {
-                                    is Decoration.Style.Highlight -> "highlight"
-                                    is Decoration.Style.Underline -> "underline"
-                                    else -> "unknown"
-                                }
-                            )
-                        )
-                    }
-                }
-            }
-        }
-
-        // Setup text selection callback
-        setupTextSelection()
+        // TODO: Add decoration tap observer once we find the correct Readium 2.4.1 API
+        // For now, decorations will render but won't be interactive
     }
 
-    private fun setupTextSelection() {
-        // Create custom action mode callback for text selection
-        val selectionCallback = object : ActionMode.Callback {
+    private fun createSelectionActionCallback(): ActionMode.Callback {
+        return object : ActionMode.Callback {
             override fun onCreateActionMode(mode: ActionMode?, menu: Menu?): Boolean {
                 // Add "Highlight" action to selection menu
                 menu?.add(0, MENU_ITEM_HIGHLIGHT, 0, "Highlight")
@@ -193,21 +167,16 @@ class EpubReaderFragment : VisualReaderFragment(), EpubNavigatorFragment.Listene
                 // Selection dismissed
             }
         }
-
-        // Apply the callback to the navigator
-        if (navigatorFragment is SelectableNavigator) {
-            (navigatorFragment as SelectableNavigator).selectionActionModeCallback = selectionCallback
-        }
     }
 
     private fun handleTextSelection() {
-        val selectableNavigator = navigatorFragment as? SelectableNavigator ?: return
-        val selection = selectableNavigator.currentSelection ?: return
-
-        // Extract selected text and locator
-        val selectedText = selection.locator.text?.highlight ?: ""
-
         viewLifecycleOwner.lifecycleScope.launch {
+            val selectableNavigator = navigatorFragment as? SelectableNavigator ?: return@launch
+            val selection = selectableNavigator.currentSelection() ?: return@launch
+
+            // Extract selected text and locator
+            val selectedText = selection.locator.text?.highlight ?: ""
+
             model.channel.send(
                 ReaderViewModel.Event.TextSelected(
                     selectedText = selectedText,

@@ -146,18 +146,6 @@ class ReadiumView(
             payload
           )
         }
-        is ReaderViewModel.Event.DecorationTapped -> {
-          val payload = Arguments.createMap().apply {
-            putString("decorationId", event.decorationId)
-            putMap("locator", Arguments.makeNativeMap(event.locator.toJSON().toMap()))
-            putString("style", event.style)
-          }
-          module.receiveEvent(
-            this.id.toInt(),
-            ReadiumViewManager.ON_DECORATION_TAPPED,
-            payload
-          )
-        }
         is ReaderViewModel.Event.TextSelected -> {
           val payload = Arguments.createMap().apply {
             putString("selectedText", event.selectedText)
@@ -169,6 +157,7 @@ class ReadiumView(
             payload
           )
         }
+        // TODO: Add DecorationTapped event handling
         else -> {
           // do nothing
         }
