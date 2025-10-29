@@ -41,6 +41,20 @@ class ReadiumViewManager(
           MapBuilder.of("bubbled", ON_TABLE_OF_CONTENTS)
         )
       )
+      .put(
+        ON_DECORATION_TAPPED,
+        MapBuilder.of(
+          "phasedRegistrationNames",
+          MapBuilder.of("bubbled", ON_DECORATION_TAPPED)
+        )
+      )
+      .put(
+        ON_TEXT_SELECTED,
+        MapBuilder.of(
+          "phasedRegistrationNames",
+          MapBuilder.of("bubbled", ON_TEXT_SELECTED)
+        )
+      )
       .build()
   }
 
@@ -120,6 +134,11 @@ class ReadiumViewManager(
     view.updatePreferencesFromJsonString(serialisedPreferences)
   }
 
+  @ReactProp(name = "decorations")
+  fun setDecorations(view: ReadiumView, decorationsJson: String?) {
+    view.applyDecorations(decorationsJson)
+  }
+
   @ReactPropGroup(names = ["width", "height"], customType = "Style")
   fun setStyle(view: ReadiumView?, index: Int, value: Int) {
     if (index == 0) {
@@ -144,6 +163,8 @@ class ReadiumViewManager(
   companion object {
     var ON_LOCATION_CHANGE = "onLocationChange"
     var ON_TABLE_OF_CONTENTS = "onTableOfContents"
+    var ON_DECORATION_TAPPED = "onDecorationTapped"
+    var ON_TEXT_SELECTED = "onTextSelected"
     var COMMAND_CREATE = 1
   }
 }

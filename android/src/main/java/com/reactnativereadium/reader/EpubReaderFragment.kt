@@ -19,9 +19,13 @@ import com.reactnativereadium.R
 import com.reactnativereadium.utils.toggleSystemUi
 import java.net.URL
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import androidx.lifecycle.lifecycleScope
 import org.readium.r2.navigator.epub.EpubNavigatorFragment
 import org.readium.r2.navigator.ExperimentalDecorator
 import org.readium.r2.navigator.Navigator
+import org.readium.r2.navigator.Decoration
+import org.readium.r2.navigator.SelectableNavigator
 import org.readium.r2.navigator.epub.EpubPreferences
 import org.readium.r2.navigator.epub.EpubPreferencesSerializer
 import org.readium.r2.shared.publication.Locator
@@ -124,32 +128,92 @@ class EpubReaderFragment : VisualReaderFragment(), EpubNavigatorFragment.Listene
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+
+        // Observe and apply user decorations
+        viewLifecycleOwner.lifecycleScope.launch {
+            model.userDecorations.collect { decorations ->
+                navigatorFragment.applyDecorations(
+                    decorations = decorations,
+                    group = "user-highlights"
+                )
+            }
+        }
+
+        // Register decoration tap observer
+        navigatorFragment.addDecorationObserver("user-highlights") { event ->
+            when (event) {
+                is Decoration.Event.OnActivated -> {
+                    val decoration = event.decoration
+                    viewLifecycleOwner.lifecycleScope.launch {
+                        model.channel.send(
+                            ReaderViewModel.Event.DecorationTapped(
+                                decorationId = decoration.id,
+                                locator = decoration.locator,
+                                style = when (decoration.style) {
+                                    is Decoration.Style.Highlight -> "highlight"
+                                    is Decoration.Style.Underline -> "underline"
+                                    else -> "unknown"
+                                }
+                            )
+                        )
+                    }
+                }
+            }
+        }
+
+        // Setup text selection callback
+        setupTextSelection()
     }
 
-    override fun onResume() {
-        super.onResume()
-        val activity = requireActivity()
-
-        if (!this::userPreferences.isInitialized) {
-          userPreferences = EpubPreferences()
-        }
-        initialPreferencesJsonString?.let { updatePreferencesFromJsonString(it)}
-
-        // If TalkBack or any touch exploration service is activated we force scroll mode (and
-        // override user preferences)
-        val am = activity.getSystemService(AppCompatActivity.ACCESSIBILITY_SERVICE) as AccessibilityManager
-        isExploreByTouchEnabled = am.isTouchExplorationEnabled
-
-        if (isExploreByTouchEnabled) {
-          this.userPreferences = this.userPreferences.plus(
-            EpubPreferences(scroll = true)
-          )
-        } else {
-            if (publication.cssStyle != "cjk-vertical") {
-              this.userPreferences = this.userPreferences.plus(
-                EpubPreferences(scroll = null)
-              )
+    private fun setupTextSelection() {
+        // Create custom action mode callback for text selection
+        val selectionCallback = object : ActionMode.Callback {
+            override fun onCreateActionMode(mode: ActionMode?, menu: Menu?): Boolean {
+                // Add "Highlight" action to selection menu
+                menu?.add(0, MENU_ITEM_HIGHLIGHT, 0, "Highlight")
+                return true
             }
+
+            override fun onPrepareActionMode(mode: ActionMode?, menu: Menu?): Boolean {
+                return false
+            }
+
+            override fun onActionItemClicked(mode: ActionMode?, item: MenuItem?): Boolean {
+                return when (item?.itemId) {
+                    MENU_ITEM_HIGHLIGHT -> {
+                        handleTextSelection()
+                        mode?.finish()
+                        true
+                    }
+                    else -> false
+                }
+            }
+
+            override fun onDestroyActionMode(mode: ActionMode?) {
+                // Selection dismissed
+            }
+        }
+
+        // Apply the callback to the navigator
+        if (navigatorFragment is SelectableNavigator) {
+            (navigatorFragment as SelectableNavigator).selectionActionModeCallback = selectionCallback
+        }
+    }
+
+    private fun handleTextSelection() {
+        val selectableNavigator = navigatorFragment as? SelectableNavigator ?: return
+        val selection = selectableNavigator.currentSelection ?: return
+
+        // Extract selected text and locator
+        val selectedText = selection.locator.text?.highlight ?: ""
+
+        viewLifecycleOwner.lifecycleScope.launch {
+            model.channel.send(
+                ReaderViewModel.Event.TextSelected(
+                    selectedText = selectedText,
+                    locator = selection.locator
+                )
+            )
         }
     }
 
@@ -170,6 +234,8 @@ class EpubReaderFragment : VisualReaderFragment(), EpubNavigatorFragment.Listene
         private const val IS_SCREEN_READER_VISIBLE_KEY = "isScreenReaderVisible"
 
         private const val IS_SEARCH_VIEW_ICONIFIED = "isSearchViewIconified"
+
+        private const val MENU_ITEM_HIGHLIGHT = 1
 
         fun newInstance(): EpubReaderFragment {
             return EpubReaderFragment()

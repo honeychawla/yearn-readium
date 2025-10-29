@@ -1,5 +1,7 @@
 package com.reactnativereadium
 
+import android.graphics.Color
+import android.util.Log
 import android.view.Choreographer
 import android.widget.FrameLayout
 import androidx.fragment.app.FragmentActivity
@@ -13,10 +15,16 @@ import com.reactnativereadium.reader.VisualReaderFragment
 import com.reactnativereadium.utils.Dimensions
 import com.reactnativereadium.utils.File
 import com.reactnativereadium.utils.LinkOrLocator
+import org.json.JSONArray
+import org.json.JSONObject
+import org.readium.r2.navigator.Decoration
+import org.readium.r2.navigator.ExperimentalDecorator
 import org.readium.r2.navigator.epub.EpubNavigatorFragment
 import org.readium.r2.navigator.epub.EpubPreferences
 import org.readium.r2.shared.extensions.toMap
+import org.readium.r2.shared.publication.Locator
 
+@OptIn(ExperimentalDecorator::class)
 class ReadiumView(
   val reactContext: ThemedReactContext
 ) : FrameLayout(reactContext) {
@@ -42,6 +50,67 @@ class ReadiumView(
 
     if (fragment is EpubReaderFragment) {
       (fragment as EpubReaderFragment).updatePreferencesFromJsonString(preferences)
+    }
+  }
+
+  /**
+   * Apply decorations from JavaScript
+   */
+  fun applyDecorations(decorationsJson: String?) {
+    if (decorationsJson == null || fragment == null) {
+      return
+    }
+
+    val decorations = parseDecorationsFromJson(decorationsJson)
+    if (fragment is EpubReaderFragment) {
+      (fragment as EpubReaderFragment).model.applyDecorations(decorations)
+    }
+  }
+
+  /**
+   * Parse JSON array of decorations into Decoration objects
+   */
+  private fun parseDecorationsFromJson(json: String): List<Decoration> {
+    try {
+      val jsonArray = JSONArray(json)
+      return (0 until jsonArray.length()).mapNotNull { i ->
+        try {
+          val obj = jsonArray.getJSONObject(i)
+          val id = obj.getString("id")
+          val locatorJson = obj.getJSONObject("locator")
+          val locator = Locator.fromJSON(JSONObject(locatorJson.toString()))
+            ?: return@mapNotNull null
+
+          val styleObj = obj.getJSONObject("style")
+          val styleType = styleObj.getString("type")
+          val colorHex = styleObj.optString("color", "#FFFF00")
+          val color = parseColor(colorHex)
+
+          val style = when (styleType) {
+            "underline" -> Decoration.Style.Underline(tint = color)
+            else -> Decoration.Style.Highlight(tint = color)
+          }
+
+          Decoration(id = id, locator = locator, style = style)
+        } catch (e: Exception) {
+          Log.e("ReadiumView", "Error parsing decoration", e)
+          null
+        }
+      }
+    } catch (e: Exception) {
+      Log.e("ReadiumView", "Error parsing decorations JSON", e)
+      return emptyList()
+    }
+  }
+
+  /**
+   * Parse hex color string to Android color int
+   */
+  private fun parseColor(hex: String): Int {
+    return try {
+      Color.parseColor(hex)
+    } catch (e: Exception) {
+      Color.YELLOW // Default fallback
     }
   }
 
@@ -74,6 +143,29 @@ class ReadiumView(
           module.receiveEvent(
             this.id.toInt(),
             ReadiumViewManager.ON_TABLE_OF_CONTENTS,
+            payload
+          )
+        }
+        is ReaderViewModel.Event.DecorationTapped -> {
+          val payload = Arguments.createMap().apply {
+            putString("decorationId", event.decorationId)
+            putMap("locator", Arguments.makeNativeMap(event.locator.toJSON().toMap()))
+            putString("style", event.style)
+          }
+          module.receiveEvent(
+            this.id.toInt(),
+            ReadiumViewManager.ON_DECORATION_TAPPED,
+            payload
+          )
+        }
+        is ReaderViewModel.Event.TextSelected -> {
+          val payload = Arguments.createMap().apply {
+            putString("selectedText", event.selectedText)
+            putMap("locator", Arguments.makeNativeMap(event.locator.toJSON().toMap()))
+          }
+          module.receiveEvent(
+            this.id.toInt(),
+            ReadiumViewManager.ON_TEXT_SELECTED,
             payload
           )
         }

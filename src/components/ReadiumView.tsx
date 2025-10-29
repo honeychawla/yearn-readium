@@ -25,6 +25,9 @@ export const ReadiumView: React.FC<ReadiumProps> = forwardRef(
     {
       onLocationChange: wrappedOnLocationChange,
       onTableOfContents: wrappedOnTableOfContents,
+      onDecorationTapped: wrappedOnDecorationTapped,
+      onTextSelected: wrappedOnTextSelected,
+      decorations,
       preferences,
       ...props
     },
@@ -71,6 +74,24 @@ export const ReadiumView: React.FC<ReadiumProps> = forwardRef(
       [wrappedOnTableOfContents]
     );
 
+    const onDecorationTapped = useCallback(
+      (event: any) => {
+        if (wrappedOnDecorationTapped) {
+          wrappedOnDecorationTapped(event.nativeEvent);
+        }
+      },
+      [wrappedOnDecorationTapped]
+    );
+
+    const onTextSelected = useCallback(
+      (event: any) => {
+        if (wrappedOnTextSelected) {
+          wrappedOnTextSelected(event.nativeEvent);
+        }
+      },
+      [wrappedOnTextSelected]
+    );
+
     // create the view fragment on android
     useEffect(() => {
       if (Platform.OS === 'android' && defaultRef.current) {
@@ -93,6 +114,11 @@ export const ReadiumView: React.FC<ReadiumProps> = forwardRef(
       [preferences]
     );
 
+    const stringifiedDecorations = useMemo(
+      () => decorations ? JSON.stringify(decorations) : undefined,
+      [decorations]
+    );
+
     return (
       <View style={styles.container} onLayout={onLayout}>
         <BaseReadiumView
@@ -100,8 +126,11 @@ export const ReadiumView: React.FC<ReadiumProps> = forwardRef(
           width={width}
           {...props}
           preferences={stringifiedPreferences}
+          decorations={stringifiedDecorations}
           onLocationChange={onLocationChange}
           onTableOfContents={onTableOfContents}
+          onDecorationTapped={onDecorationTapped}
+          onTextSelected={onTextSelected}
           ref={defaultRef}
         />
       </View>
