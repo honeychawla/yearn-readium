@@ -71,12 +71,12 @@ class ReadiumView(
 
     if (fragment is EpubReaderFragment) {
       val epubFragment = fragment as EpubReaderFragment
-      // Check if model is initialized before accessing
-      if (epubFragment::model.isInitialized) {
+      // Check if fragment is ready before accessing model
+      if (epubFragment.isReady()) {
         Log.d("ReadiumView", "Applying ${decorations.size} decorations to fragment")
         epubFragment.model.applyDecorations(decorations)
       } else {
-        Log.w("ReadiumView", "Model not initialized, decorations will apply when ready")
+        Log.w("ReadiumView", "Fragment not ready yet, decorations will apply when ready")
       }
     }
   }

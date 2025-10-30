@@ -42,6 +42,11 @@ class EpubReaderFragment : VisualReaderFragment(), EpubNavigatorFragment.Listene
     private lateinit var factory: ReaderViewModel.Factory
     private var initialPreferencesJsonString: String? = null
 
+    // Check if fragment is ready for decorations
+    fun isReady(): Boolean {
+        return this::model.isInitialized
+    }
+
     private lateinit var menuScreenReader: MenuItem
     private lateinit var menuSearch: MenuItem
     lateinit var menuSearchView: SearchView
