@@ -5,8 +5,9 @@ import React, {
   forwardRef,
   useRef,
   useMemo,
+  useImperativeHandle,
 } from 'react';
-import { View, Platform, findNodeHandle, StyleSheet } from 'react-native';
+import { View, Platform, findNodeHandle, StyleSheet, UIManager } from 'react-native';
 
 import type {
   BaseReadiumViewProps,
@@ -100,14 +101,27 @@ export const ReadiumView: React.FC<ReadiumProps> = forwardRef(
       }
     }, []);
 
-    // assign the forwarded ref
-    useEffect(() => {
-      if (forwardedRef && 'current' in forwardedRef) {
-        forwardedRef.current = defaultRef.current;
-      } else if (forwardedRef) {
-        forwardedRef(defaultRef);
-      }
-    }, [defaultRef.current !== null]);
+    // Expose methods to the forwarded ref
+    useImperativeHandle(forwardedRef, () => ({
+      updateLocation: (locator: any) => {
+        console.log('📍 ReadiumView.updateLocation called with:', locator);
+        if (defaultRef.current) {
+          const viewId = findNodeHandle(defaultRef.current);
+          if (viewId) {
+            // Call the native updateLocation command
+            UIManager.dispatchViewManagerCommand(
+              viewId,
+              UIManager.getViewManagerConfig('ReadiumView').Commands.updateLocation,
+              [locator]
+            );
+            console.log('✅ Dispatched updateLocation command to native');
+            return true;
+          }
+        }
+        console.warn('⚠️ Could not dispatch updateLocation');
+        return false;
+      },
+    }), [defaultRef.current]);
 
     const stringifiedPreferences = useMemo(
       () => JSON.stringify(preferences),

@@ -59,7 +59,10 @@ class ReadiumViewManager(
   }
 
   override fun getCommandsMap(): MutableMap<String, Int> {
-    return MapBuilder.of("create", COMMAND_CREATE)
+    return MapBuilder.of(
+      "create", COMMAND_CREATE,
+      "updateLocation", COMMAND_UPDATE_LOCATION
+    )
   }
 
   override fun receiveCommand(view: ReadiumView, commandId: String?, args: ReadableArray?) {
@@ -73,6 +76,15 @@ class ReadiumViewManager(
 
         if (view.file != null) {
           buildForViewIfReady(view)
+        }
+      }
+      COMMAND_UPDATE_LOCATION -> {
+        val locationMap = args.getMap(1)
+        if (locationMap != null) {
+          val location = locationToLinkOrLocator(locationMap)
+          if (location != null) {
+            view.updateLocation(location)
+          }
         }
       }
       else -> {
@@ -166,5 +178,6 @@ class ReadiumViewManager(
     var ON_DECORATION_TAPPED = "onDecorationTapped"
     var ON_TEXT_SELECTED = "onTextSelected"
     var COMMAND_CREATE = 1
+    var COMMAND_UPDATE_LOCATION = 2
   }
 }
