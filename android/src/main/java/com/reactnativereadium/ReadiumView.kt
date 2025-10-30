@@ -57,18 +57,26 @@ class ReadiumView(
    * Apply decorations from JavaScript
    */
   fun applyDecorations(decorationsJson: String?) {
-    if (decorationsJson == null || fragment == null) {
+    if (decorationsJson == null) {
       return
     }
 
     val decorations = parseDecorationsFromJson(decorationsJson)
+    Log.d("ReadiumView", "applyDecorations called with ${decorations.size} decorations")
+
+    if (fragment == null) {
+      Log.w("ReadiumView", "Fragment is null, decorations will be applied when fragment is ready")
+      return
+    }
+
     if (fragment is EpubReaderFragment) {
       val epubFragment = fragment as EpubReaderFragment
       // Check if model is initialized before accessing
       if (epubFragment::model.isInitialized) {
+        Log.d("ReadiumView", "Applying ${decorations.size} decorations to fragment")
         epubFragment.model.applyDecorations(decorations)
       } else {
-        Log.w("ReadiumView", "Fragment not ready, skipping decoration update")
+        Log.w("ReadiumView", "Model not initialized, decorations will apply when ready")
       }
     }
   }
