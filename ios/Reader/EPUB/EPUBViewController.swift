@@ -2,8 +2,13 @@ import UIKit
 import R2Shared
 import R2Navigator
 import ReadiumAdapterGCDWebServer
+import Combine
 
 class EPUBViewController: ReaderViewController {
+
+    // Decoration manager for highlights
+    let decorationManager = DecorationManager()
+    private var decorationCancellable: AnyCancellable?
 
     init(
       publication: Publication,
@@ -34,6 +39,28 @@ class EPUBViewController: ReaderViewController {
 
       /// Set initial UI appearance.
       setUIColor(for: epubNavigator.settings.theme)
+
+      // Observe decoration changes and apply to navigator
+      if #available(iOS 13.0, *) {
+        decorationCancellable = decorationManager.$userDecorations
+          .sink { [weak self] decorations in
+            guard let self = self,
+                  let decorableNavigator = self.navigator as? DecorableNavigator else { return }
+
+            print("EPUBViewController: Applying \(decorations.count) decorations to navigator")
+            decorableNavigator.apply(decorations: decorations, in: "user-highlights")
+          }
+      }
+
+      // Setup text selection handler
+      setupTextSelection()
+
+      // Setup decoration tap observer
+      setupDecorationObserver()
+    }
+
+    deinit {
+      decorationCancellable?.cancel()
     }
 
     internal func setUIColor(for theme: Theme) {
@@ -59,6 +86,62 @@ class EPUBViewController: ReaderViewController {
 }
 
 extension EPUBViewController: EPUBNavigatorDelegate {}
+
+// MARK: - Highlights & Text Selection
+
+extension EPUBViewController {
+
+    fileprivate func setupTextSelection() {
+        // Setup custom selection menu for highlights
+        // Note: Text selection handling in iOS is done through UIMenuController
+        // We'll need to add custom menu items for "Highlight"
+        // For now, this is a placeholder - will implement in next iteration
+        print("EPUBViewController: Text selection setup (TODO)")
+    }
+
+    fileprivate func setupDecorationObserver() {
+        guard let decorableNavigator = navigator as? DecorableNavigator else {
+            print("EPUBViewController: Navigator doesn't support decorations")
+            return
+        }
+
+        // Observe decoration taps
+        decorableNavigator.observe(group: "user-highlights") { [weak self] event in
+            guard let self = self else { return }
+
+            switch event {
+            case .onActivated(let decoration, _):
+                print("EPUBViewController: Decoration tapped: \(decoration.id)")
+                self.handleDecorationTap(decoration)
+            default:
+                break
+            }
+        }
+    }
+
+    fileprivate func handleDecorationTap(_ decoration: Decoration) {
+        // Send decoration tap event to JavaScript
+        guard let parentVC = parent as? ReadiumView else { return }
+
+        let styleString: String
+        switch decoration.style {
+        case is Decoration.Style.Highlight:
+            styleString = "highlight"
+        case is Decoration.Style.Underline:
+            styleString = "underline"
+        default:
+            styleString = "unknown"
+        }
+
+        let eventData: [String: Any] = [
+            "decorationId": decoration.id,
+            "locator": decoration.locator.jsonDictionary ?? [:],
+            "style": styleString
+        ]
+
+        parentVC.onDecorationTapped?(eventData)
+    }
+}
 
 extension EPUBViewController: UIGestureRecognizerDelegate {
 

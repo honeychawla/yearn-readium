@@ -33,8 +33,15 @@ class ReadiumView : UIView, Loggable {
       self.updatePreferences(preferences)
     }
   }
+  @objc var decorations: NSString? = nil {
+    didSet {
+      self.updateDecorations(decorations)
+    }
+  }
   @objc var onLocationChange: RCTDirectEventBlock?
   @objc var onTableOfContents: RCTDirectEventBlock?
+  @objc var onDecorationTapped: RCTDirectEventBlock?
+  @objc var onTextSelected: RCTDirectEventBlock?
 
   func loadBook(
     url: String,
@@ -103,6 +110,67 @@ class ReadiumView : UIView, Loggable {
     }
   }
 
+  func updateDecorations(_ decorations: NSString?) {
+    guard decorations != nil else {
+      return
+    }
+
+    guard let epubVC = readerViewController as? EPUBViewController else {
+      print("ReadiumView: ReaderViewController is not EPUBViewController, skipping decorations")
+      return
+    }
+
+    guard let decorationsJson = decorations as? String else {
+      print("ReadiumView: Bad string conversion for decorations")
+      return
+    }
+
+    let parsedDecorations = parseDecorationsFromJSON(decorationsJson)
+    print("ReadiumView: Applying \(parsedDecorations.count) decorations")
+    epubVC.decorationManager.applyDecorations(parsedDecorations)
+  }
+
+  private func parseDecorationsFromJSON(_ json: String) -> [Decoration] {
+    guard let data = json.data(using: .utf8),
+          let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+      print("ReadiumView: Failed to parse decorations JSON")
+      return []
+    }
+
+    var decorations: [Decoration] = []
+
+    for obj in jsonArray {
+      guard let id = obj["id"] as? String,
+            let locatorDict = obj["locator"] as? [String: Any],
+            let styleDict = obj["style"] as? [String: Any],
+            let styleType = styleDict["type"] as? String else {
+        continue
+      }
+
+      // Parse locator from JSON
+      guard let locator = try? Locator(json: locatorDict) else {
+        print("ReadiumView: Failed to parse locator")
+        continue
+      }
+
+      // Parse color (default to yellow)
+      let colorHex = styleDict["color"] as? String ?? "#FFFF00"
+      let color = UIColor(hex: colorHex) ?? .yellow
+
+      // Create decoration style
+      let style: Decoration.Style
+      if styleType == "underline" {
+        style = Decoration.Style.underline(tint: color)
+      } else {
+        style = Decoration.Style.highlight(tint: color, isActive: false)
+      }
+
+      decorations.append(Decoration(id: id, locator: locator, style: style))
+    }
+
+    return decorations
+  }
+
   override func removeFromSuperview() {
     readerViewController?.willMove(toParent: nil)
     readerViewController?.view.removeFromSuperview()
@@ -161,5 +229,31 @@ class ReadiumView : UIView, Loggable {
         return link.json
       })
     ])
+
+    // Apply decorations if they were set before view controller was ready
+    if decorations != nil {
+      updateDecorations(decorations)
+    }
   }
+}
+
+// MARK: - UIColor Hex Extension
+
+extension UIColor {
+    convenience init?(hex: String) {
+        var hexSanitized = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        hexSanitized = hexSanitized.replacingOccurrences(of: "#", with: "")
+
+        var rgb: UInt64 = 0
+
+        guard Scanner(string: hexSanitized).scanHexInt64(&rgb) else {
+            return nil
+        }
+
+        let r = CGFloat((rgb & 0xFF0000) >> 16) / 255.0
+        let g = CGFloat((rgb & 0x00FF00) >> 8) / 255.0
+        let b = CGFloat(rgb & 0x0000FF) / 255.0
+
+        self.init(red: r, green: g, blue: b, alpha: 1.0)
+    }
 }
