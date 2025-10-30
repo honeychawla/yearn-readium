@@ -18,7 +18,14 @@ class EPUBViewController: ReaderViewController {
       let navigator = try EPUBNavigatorViewController(
         publication: publication,
         initialLocation: locator,
-        httpServer: GCDHTTPServer.shared
+        httpServer: GCDHTTPServer.shared,
+        config: EPUBNavigatorViewController.Configuration {
+          // Custom text selection handler
+          $0.editingActions.append(EditingAction(
+            title: "Highlight",
+            action: #selector(EPUBViewController.handleHighlightAction(_:))
+          ))
+        }
       )
 
       super.init(
@@ -92,11 +99,39 @@ extension EPUBViewController: EPUBNavigatorDelegate {}
 extension EPUBViewController {
 
     fileprivate func setupTextSelection() {
-        // Setup custom selection menu for highlights
-        // Note: Text selection handling in iOS is done through UIMenuController
-        // We'll need to add custom menu items for "Highlight"
-        // For now, this is a placeholder - will implement in next iteration
-        print("EPUBViewController: Text selection setup (TODO)")
+        // Text selection is configured in the init with editingActions
+        // The handleHighlightAction method is called when user taps "Highlight"
+        print("EPUBViewController: Text selection configured with Highlight action")
+    }
+
+    @objc fileprivate func handleHighlightAction(_ sender: Any) {
+        print("EPUBViewController: Highlight action triggered")
+
+        guard let selectableNavigator = navigator as? SelectableNavigator else {
+            print("EPUBViewController: Navigator is not SelectableNavigator")
+            return
+        }
+
+        Task {
+            guard let selection = await selectableNavigator.currentSelection() else {
+                print("EPUBViewController: No current selection")
+                return
+            }
+
+            // Extract selected text
+            let selectedText = selection.locator.text.highlight ?? ""
+            print("EPUBViewController: Selected text: \(selectedText)")
+
+            // Send to JavaScript
+            guard let parentVC = parent as? ReadiumView else { return }
+
+            let eventData: [String: Any] = [
+                "selectedText": selectedText,
+                "locator": selection.locator.jsonDictionary ?? [:]
+            ]
+
+            parentVC.onTextSelected?(eventData)
+        }
     }
 
     fileprivate func setupDecorationObserver() {
