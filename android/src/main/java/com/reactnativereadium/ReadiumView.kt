@@ -63,7 +63,13 @@ class ReadiumView(
 
     val decorations = parseDecorationsFromJson(decorationsJson)
     if (fragment is EpubReaderFragment) {
-      (fragment as EpubReaderFragment).model.applyDecorations(decorations)
+      val epubFragment = fragment as EpubReaderFragment
+      // Check if model is initialized before accessing
+      if (epubFragment::model.isInitialized) {
+        epubFragment.model.applyDecorations(decorations)
+      } else {
+        Log.w("ReadiumView", "Fragment not ready, skipping decoration update")
+      }
     }
   }
 
