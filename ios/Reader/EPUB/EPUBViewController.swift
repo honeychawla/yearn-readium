@@ -131,6 +131,10 @@ extension EPUBViewController {
             ]
 
             parentVC.onTextSelected?(eventData)
+
+            // Clear the selection after creating highlight
+            selectableNavigator.clearSelection()
+            print("EPUBViewController: Selection cleared")
         }
     }
 

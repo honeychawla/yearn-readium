@@ -202,6 +202,10 @@ class EpubReaderFragment : VisualReaderFragment(), EpubNavigatorFragment.Listene
                 )
             )
             android.util.Log.d("EpubReader", "TextSelected event sent")
+
+            // Clear the selection after sending the event
+            selectableNavigator.clearSelection()
+            android.util.Log.d("EpubReader", "Selection cleared")
         }
     }
 
