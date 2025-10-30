@@ -147,6 +147,7 @@ class ReadiumView(
           )
         }
         is ReaderViewModel.Event.TextSelected -> {
+          Log.d("ReadiumView", "Received TextSelected event: ${event.selectedText}")
           val payload = Arguments.createMap().apply {
             putString("selectedText", event.selectedText)
             putMap("locator", Arguments.makeNativeMap(event.locator.toJSON().toMap()))
@@ -156,6 +157,7 @@ class ReadiumView(
             ReadiumViewManager.ON_TEXT_SELECTED,
             payload
           )
+          Log.d("ReadiumView", "TextSelected event forwarded to JavaScript")
         }
         // TODO: Add DecorationTapped event handling
         else -> {

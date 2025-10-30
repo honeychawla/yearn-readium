@@ -25,6 +25,7 @@ import org.readium.r2.navigator.epub.EpubNavigatorFragment
 import org.readium.r2.navigator.ExperimentalDecorator
 import org.readium.r2.navigator.Navigator
 import org.readium.r2.navigator.DecorableNavigator
+import org.readium.r2.navigator.SelectableNavigator
 import org.readium.r2.navigator.epub.EpubPreferences
 import org.readium.r2.navigator.epub.EpubPreferencesSerializer
 import org.readium.r2.shared.publication.Locator
@@ -170,19 +171,32 @@ class EpubReaderFragment : VisualReaderFragment(), EpubNavigatorFragment.Listene
     }
 
     private fun handleTextSelection() {
+        android.util.Log.d("EpubReader", "handleTextSelection called")
         viewLifecycleOwner.lifecycleScope.launch {
-            val selectableNavigator = navigatorFragment as? SelectableNavigator ?: return@launch
-            val selection = selectableNavigator.currentSelection() ?: return@launch
+            val selectableNavigator = navigatorFragment as? SelectableNavigator
+            if (selectableNavigator == null) {
+                android.util.Log.e("EpubReader", "Navigator is not SelectableNavigator")
+                return@launch
+            }
+
+            val selection = selectableNavigator.currentSelection()
+            if (selection == null) {
+                android.util.Log.e("EpubReader", "No selection available")
+                return@launch
+            }
 
             // Extract selected text and locator
             val selectedText = selection.locator.text?.highlight ?: ""
+            android.util.Log.d("EpubReader", "Selected text: $selectedText")
 
-            model.channel.send(
+            // Send to the fragment's channel
+            channel.send(
                 ReaderViewModel.Event.TextSelected(
                     selectedText = selectedText,
                     locator = selection.locator
                 )
             )
+            android.util.Log.d("EpubReader", "TextSelected event sent")
         }
     }
 
