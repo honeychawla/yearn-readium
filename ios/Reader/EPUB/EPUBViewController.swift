@@ -15,17 +15,18 @@ class EPUBViewController: ReaderViewController {
       locator: Locator?,
       bookId: String
     ) throws {
+      // Create configuration with custom editing actions
+      var config = EPUBNavigatorViewController.Configuration()
+      config.editingActions.append(EditingAction(
+        title: "Highlight",
+        action: #selector(EPUBViewController.handleHighlightAction(_:))
+      ))
+
       let navigator = try EPUBNavigatorViewController(
         publication: publication,
         initialLocation: locator,
-        httpServer: GCDHTTPServer.shared,
-        config: EPUBNavigatorViewController.Configuration {
-          // Custom text selection handler
-          $0.editingActions.append(EditingAction(
-            title: "Highlight",
-            action: #selector(EPUBViewController.handleHighlightAction(_:))
-          ))
-        }
+        config: config,
+        httpServer: GCDHTTPServer.shared
       )
 
       super.init(
@@ -113,7 +114,7 @@ extension EPUBViewController {
         }
 
         Task {
-            guard let selection = await selectableNavigator.currentSelection() else {
+            guard let selection = await selectableNavigator.currentSelection else {
                 print("EPUBViewController: No current selection")
                 return
             }
@@ -127,7 +128,7 @@ extension EPUBViewController {
 
             let eventData: [String: Any] = [
                 "selectedText": selectedText,
-                "locator": selection.locator.jsonDictionary ?? [:]
+                "locator": selection.locator.json
             ]
 
             parentVC.onTextSelected?(eventData)
@@ -139,42 +140,21 @@ extension EPUBViewController {
     }
 
     fileprivate func setupDecorationObserver() {
-        guard let decorableNavigator = navigator as? DecorableNavigator else {
-            print("EPUBViewController: Navigator doesn't support decorations")
-            return
-        }
-
-        // Observe decoration taps
-        decorableNavigator.observe(group: "user-highlights") { [weak self] event in
-            guard let self = self else { return }
-
-            switch event {
-            case .onActivated(let decoration, _):
-                print("EPUBViewController: Decoration tapped: \(decoration.id)")
-                self.handleDecorationTap(decoration)
-            default:
-                break
-            }
-        }
+        // TODO: Update to Readium 2.6.0 decoration observer API
+        // The observe() method API has changed in newer versions
+        print("EPUBViewController: Decoration observer not yet implemented for Readium 2.6.0")
     }
 
     fileprivate func handleDecorationTap(_ decoration: Decoration) {
         // Send decoration tap event to JavaScript
         guard let parentVC = parent as? ReadiumView else { return }
 
-        let styleString: String
-        switch decoration.style {
-        case is Decoration.Style.Highlight:
-            styleString = "highlight"
-        case is Decoration.Style.Underline:
-            styleString = "underline"
-        default:
-            styleString = "unknown"
-        }
+        // TODO: Update to Readium 2.6.0 Decoration.Style API
+        let styleString = "highlight" // Default for now
 
         let eventData: [String: Any] = [
             "decorationId": decoration.id,
-            "locator": decoration.locator.jsonDictionary ?? [:],
+            "locator": decoration.locator.json,
             "style": styleString
         ]
 
