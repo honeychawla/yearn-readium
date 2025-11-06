@@ -6,4 +6,8 @@ class ReadiumViewManager: RCTViewManager {
     let view = ReadiumView()
     return view
   }
+
+  override static func requiresMainQueueSetup() -> Bool {
+    return true
+  }
 }

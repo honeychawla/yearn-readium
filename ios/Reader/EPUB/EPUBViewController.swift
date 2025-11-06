@@ -48,6 +48,9 @@ class EPUBViewController: ReaderViewController {
       /// Set initial UI appearance.
       setUIColor(for: epubNavigator.settings.theme)
 
+      // Become first responder to receive menu actions
+      becomeFirstResponder()
+
       // Observe decoration changes and apply to navigator
       if #available(iOS 13.0, *) {
         decorationCancellable = decorationManager.$userDecorations
@@ -93,11 +96,30 @@ class EPUBViewController: ReaderViewController {
 
 }
 
-extension EPUBViewController: EPUBNavigatorDelegate {}
+extension EPUBViewController: EPUBNavigatorDelegate {
+
+    // Allow the default menu to show - it will include our custom Highlight action
+    func navigator(_ navigator: SelectableNavigator, shouldShowMenuForSelection selection: Selection) -> Bool {
+        NSLog("📝 shouldShowMenuForSelection called - showing menu")
+        return true // Show the default menu with our Highlight action
+    }
+}
 
 // MARK: - Highlights & Text Selection
 
 extension EPUBViewController {
+
+    override var canBecomeFirstResponder: Bool {
+        return true
+    }
+
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        if action == #selector(handleHighlightAction(_:)) {
+            NSLog("🔥 canPerformAction: YES for handleHighlightAction")
+            return true
+        }
+        return super.canPerformAction(action, withSender: sender)
+    }
 
     fileprivate func setupTextSelection() {
         // Text selection is configured in the init with editingActions
@@ -105,7 +127,8 @@ extension EPUBViewController {
         print("EPUBViewController: Text selection configured with Highlight action")
     }
 
-    @objc fileprivate func handleHighlightAction(_ sender: Any) {
+    @objc func handleHighlightAction(_ sender: Any) {
+        NSLog("🎯🎯🎯 HIGHLIGHT ACTION TRIGGERED!!!")
         print("EPUBViewController: Highlight action triggered")
 
         guard let selectableNavigator = navigator as? SelectableNavigator else {
@@ -113,7 +136,7 @@ extension EPUBViewController {
             return
         }
 
-        Task {
+        Task { @MainActor in
             guard let selection = await selectableNavigator.currentSelection else {
                 print("EPUBViewController: No current selection")
                 return
@@ -123,18 +146,32 @@ extension EPUBViewController {
             let selectedText = selection.locator.text.highlight ?? ""
             print("EPUBViewController: Selected text: \(selectedText)")
 
-            // Send to JavaScript
-            guard let parentVC = parent as? ReadiumView else { return }
+            // Send to JavaScript - find ReadiumView in view hierarchy
+            var readiumView: ReadiumView? = nil
+            var currentView = self.view.superview
+            while currentView != nil {
+                if let found = currentView as? ReadiumView {
+                    readiumView = found
+                    break
+                }
+                currentView = currentView?.superview
+            }
 
+            guard let readiumView = readiumView else {
+                print("EPUBViewController: Could not find ReadiumView")
+                return
+            }
+
+            let locatorJson: [String: Any] = selection.locator.json
             let eventData: [String: Any] = [
                 "selectedText": selectedText,
-                "locator": selection.locator.json
+                "locator": locatorJson
             ]
 
-            parentVC.onTextSelected?(eventData)
+            readiumView.onTextSelected?(eventData)
 
             // Clear the selection after creating highlight
-            selectableNavigator.clearSelection()
+            await selectableNavigator.clearSelection()
             print("EPUBViewController: Selection cleared")
         }
     }
