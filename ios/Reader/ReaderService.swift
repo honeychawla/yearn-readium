@@ -2,19 +2,32 @@ import Combine
 import Foundation
 import R2Shared
 import R2Streamer
+import ReadiumLCP
 import UIKit
 
 final class ReaderService: Loggable {
   var app: AppModule?
-  var streamer = Streamer()
+  var streamer: Streamer
   private var subscriptions = Set<AnyCancellable>()
 
   init() {
     do {
       self.app = try AppModule()
+
+      // Initialize streamer with LCP content protection if available
+      if let lcpService = self.app?.lcpService {
+        self.streamer = Streamer(
+          contentProtections: [lcpService.contentProtection()]
+        )
+        print("[LCP] Streamer initialized with LCP support")
+      } else {
+        self.streamer = Streamer()
+        print("[LCP] Streamer initialized without LCP support")
+      }
     } catch {
       print("TODO: An error occurred instantiating the ReaderService")
       print(error)
+      self.streamer = Streamer()
     }
   }
   

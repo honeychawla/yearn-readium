@@ -3,6 +3,7 @@ import Foundation
 import UIKit
 import R2Shared
 import R2Streamer
+import ReadiumLCP
 
 
 /// Base module delegate, that sub-modules' delegate can extend.
@@ -21,10 +22,23 @@ final class AppModule {
   // App modules
   var reader: ReaderModuleAPI! = nil
 
+  // LCP service
+  var lcpService: LCPService?
+
   init() throws {
     guard let server = PublicationServer() else {
       /// FIXME: we should recover properly if the publication server can't start, maybe this should only forbid opening a publication?
       fatalError("Can't start publication server")
+    }
+
+    // Initialize LCP service with R2LCPClient
+    do {
+      let lcpClient = LCPClientImpl()
+      lcpService = try LCPService(client: lcpClient)
+      print("[LCP] Service initialized successfully")
+    } catch {
+      print("[LCP] Failed to initialize LCP service: \(error)")
+      // LCP is optional, continue without it
     }
 
     reader = ReaderModule(delegate: self)
