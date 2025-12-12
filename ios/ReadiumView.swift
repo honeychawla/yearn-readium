@@ -18,8 +18,9 @@ class ReadiumView : UIView, Loggable {
   @objc var file: NSDictionary? = nil {
     didSet {
       let initialLocation = file?["initialLocation"] as? NSDictionary
+      let lcpPassphrase = file?["lcpPassphrase"] as? String
       if let url = file?["url"] as? String {
-        self.loadBook(url: url, location: initialLocation)
+        self.loadBook(url: url, location: initialLocation, lcpPassphrase: lcpPassphrase)
       }
     }
   }
@@ -45,7 +46,8 @@ class ReadiumView : UIView, Loggable {
 
   func loadBook(
     url: String,
-    location: NSDictionary?
+    location: NSDictionary?,
+    lcpPassphrase: String?
   ) {
     guard let rootViewController = UIApplication.shared.delegate?.window??.rootViewController else { return }
 
@@ -53,6 +55,7 @@ class ReadiumView : UIView, Loggable {
       url: url,
       bookId: url,
       location: location,
+      lcpPassphrase: lcpPassphrase,
       sender: rootViewController,
       completion: { vc in
         self.addViewControllerAsSubview(vc)

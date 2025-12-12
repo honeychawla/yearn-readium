@@ -32,14 +32,9 @@ final class AppModule {
     }
 
     // Initialize LCP service with R2LCPClient
-    do {
-      let lcpClient = LCPClientImpl()
-      lcpService = try LCPService(client: lcpClient)
-      print("[LCP] Service initialized successfully")
-    } catch {
-      print("[LCP] Failed to initialize LCP service: \(error)")
-      // LCP is optional, continue without it
-    }
+    let lcpClient = LCPClientImpl()
+    lcpService = LCPService(client: lcpClient)
+    print("[LCP] Service initialized successfully")
 
     reader = ReaderModule(delegate: self)
 

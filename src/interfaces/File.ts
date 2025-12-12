@@ -11,4 +11,10 @@ export interface File {
    * An optional location that the eBook will be opened at.
    */
   initialLocation?: Locator | Link;
+
+  /**
+   * An optional passphrase for LCP-protected EPUBs.
+   * If provided, Readium will use this to decrypt without prompting the user.
+   */
+  lcpPassphrase?: string;
 }

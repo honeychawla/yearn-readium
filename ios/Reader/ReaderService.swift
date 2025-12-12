@@ -9,21 +9,15 @@ final class ReaderService: Loggable {
   var app: AppModule?
   var streamer: Streamer
   private var subscriptions = Set<AnyCancellable>()
+  var lcpPassphrase: String? = nil
 
   init() {
     do {
       self.app = try AppModule()
 
-      // Initialize streamer with LCP content protection if available
-      if let lcpService = self.app?.lcpService {
-        self.streamer = Streamer(
-          contentProtections: [lcpService.contentProtection()]
-        )
-        print("[LCP] Streamer initialized with LCP support")
-      } else {
-        self.streamer = Streamer()
-        print("[LCP] Streamer initialized without LCP support")
-      }
+      // Streamer will be recreated with proper auth when opening a book
+      self.streamer = Streamer()
+      print("[LCP] Streamer initialized (will add LCP when passphrase is available)")
     } catch {
       print("TODO: An error occurred instantiating the ReaderService")
       print(error)
@@ -66,12 +60,36 @@ final class ReaderService: Loggable {
     url: String,
     bookId: String,
     location: NSDictionary?,
+    lcpPassphrase: String?,
     sender: UIViewController?,
     completion: @escaping (ReaderViewController) -> Void
   ) {
+    // Store the hashed passphrase for this book
+    self.lcpPassphrase = lcpPassphrase
+
+    // Recreate streamer with LCP authentication if passphrase is provided
+    if let passphrase = lcpPassphrase, let lcpService = self.app?.lcpService {
+      print("[LCP] ✅ Creating streamer with automatic authentication")
+      print("[LCP] Hashed passphrase: \(passphrase.prefix(16))...")
+
+      // Create authentication that will provide the hashed passphrase automatically
+      let authentication = LCPPassphraseAuthentication(passphrase)
+
+      // Recreate streamer with this authentication
+      self.streamer = Streamer(
+        contentProtections: [lcpService.contentProtection(with: authentication)]
+      )
+    } else if let lcpService = self.app?.lcpService {
+      // No passphrase - use default dialog authentication
+      print("[LCP] No passphrase provided - will prompt user if needed")
+      self.streamer = Streamer(
+        contentProtections: [lcpService.contentProtection()]
+      )
+    }
+
     guard let reader = self.app?.reader else { return }
     self.url(path: url)
-      .flatMap { self.openPublication(at: $0, allowUserInteraction: true, sender: sender ) }
+      .flatMap { self.openPublication(at: $0, allowUserInteraction: false, sender: sender ) }
       .flatMap { (pub, _) in self.checkIsReadable(publication: pub) }
       .sink(
         receiveCompletion: { error in
