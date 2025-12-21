@@ -99,6 +99,44 @@ Finally, install the pods:
 
 `pod install`
 
+#### Expo
+
+If you're using Expo, you'll need to configure the Expo config plugin in your `app.json` or `app.config.js`:
+
+```json
+{
+  "expo": {
+    "plugins": [
+      "react-native-readium"
+    ]
+  }
+}
+```
+
+Or if using `app.config.js`:
+
+```js
+export default {
+  expo: {
+    plugins: [
+      "react-native-readium"
+    ]
+  }
+}
+```
+
+After adding the plugin, you'll need to rebuild your app:
+
+```sh
+# For development builds
+npx expo prebuild --clean
+npx expo run:ios  # or expo run:android
+```
+
+**Note**: This package is **not compatible with Expo Go**. You must use a [development build](https://docs.expo.dev/develop/development-builds/introduction/) or create a [custom dev client](https://docs.expo.dev/develop/development-builds/create-a-build/).
+
+You'll still need to manually update your `Podfile` as described in the iOS section above, even when using Expo.
+
 #### Android
 
 If you're not using `compileSdkVersion` >= 31 you'll need to update that:
