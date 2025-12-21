@@ -6,24 +6,119 @@ import R2Shared
 import UIKit
 
 /// View controller for playing LCP-protected audiobooks
-final class AudiobookViewController: ReaderViewController {
+final class AudiobookViewController: ReaderViewController, _AudioNavigatorDelegate {
 
-    private var player: AVPlayer?
-    private var playerItem: AVPlayerItem?
-    private var timeObserver: Any?
+    private var audioNavigator: _AudioNavigator?
 
-    // UI Elements
+    // Book metadata
+    private var bookTitle: String
+    private var bookAuthor: String
+    private var coverImageURL: URL?
+
+    // Colors matching the TypeScript player
+    private let backgroundColor = UIColor(red: 0x19/255.0, green: 0x27/255.0, blue: 0x44/255.0, alpha: 1.0) // #192744
+    private let primaryColor = UIColor(red: 0xF5/255.0, green: 0xE5/255.0, blue: 0xD5/255.0, alpha: 1.0) // #F5E5D5
+    private let secondaryColor = UIColor(red: 0x8B/255.0, green: 0x9B/255.0, blue: 0x99/255.0, alpha: 1.0) // #8B9B99
+    private let accentColor = UIColor(red: 0xC5/255.0, green: 0xB1/255.0, blue: 0x89/255.0, alpha: 1.0) // #c5b189
+    private let buttonColor = UIColor(red: 0x09/255.0, green: 0x1E/255.0, blue: 0x3D/255.0, alpha: 1.0) // #091e3d
+
+    // Loading UI
+    private lazy var loadingContainer: UIView = {
+        let view = UIView()
+        view.backgroundColor = backgroundColor
+        view.translatesAutoresizingMaskIntoConstraints = false
+        return view
+    }()
+
+    private lazy var activityIndicator: UIActivityIndicatorView = {
+        let indicator = UIActivityIndicatorView(style: .large)
+        indicator.color = accentColor
+        indicator.translatesAutoresizingMaskIntoConstraints = false
+        return indicator
+    }()
+
+    private lazy var loadingLabel: UILabel = {
+        let label = UILabel()
+        label.text = "Preparing audiobook..."
+        label.font = .systemFont(ofSize: 16, weight: .medium)
+        label.textColor = primaryColor
+        label.textAlignment = .center
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
+    private lazy var progressView: UIProgressView = {
+        let progress = UIProgressView(progressViewStyle: .default)
+        progress.progressTintColor = accentColor
+        progress.trackTintColor = secondaryColor.withAlphaComponent(0.3)
+        progress.translatesAutoresizingMaskIntoConstraints = false
+        return progress
+    }()
+
+    // Player UI Elements
+    private lazy var coverImageView: UIImageView = {
+        let imageView = UIImageView()
+        imageView.contentMode = .scaleAspectFill
+        imageView.clipsToBounds = true
+        imageView.layer.cornerRadius = 16
+        imageView.backgroundColor = UIColor(red: 0x33/255.0, green: 0x46/255.0, blue: 0x5C/255.0, alpha: 1.0)
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        return imageView
+    }()
+
+    private lazy var titleLabel: UILabel = {
+        let label = UILabel()
+        label.font = .systemFont(ofSize: 24, weight: .regular)
+        label.textColor = primaryColor
+        label.textAlignment = .center
+        label.numberOfLines = 2
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
+    private lazy var authorLabel: UILabel = {
+        let label = UILabel()
+        label.font = .systemFont(ofSize: 16, weight: .regular)
+        label.textColor = secondaryColor
+        label.textAlignment = .center
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
     private lazy var playPauseButton: UIButton = {
-        let button = UIButton(type: .system)
-        button.setImage(UIImage(systemName: "play.circle.fill"), for: .normal)
+        let button = UIButton(type: .custom)
+        button.setImage(UIImage(systemName: "play.circle.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 48)), for: .normal)
+        button.tintColor = buttonColor
+        button.backgroundColor = accentColor
+        button.layer.cornerRadius = 40
         button.addTarget(self, action: #selector(togglePlayPause), for: .touchUpInside)
-        button.tintColor = .systemBlue
+        button.translatesAutoresizingMaskIntoConstraints = false
+        return button
+    }()
+
+    private lazy var skipBackButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.setImage(UIImage(systemName: "gobackward.15", withConfiguration: UIImage.SymbolConfiguration(pointSize: 28)), for: .normal)
+        button.tintColor = primaryColor
+        button.addTarget(self, action: #selector(skipBackward), for: .touchUpInside)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        return button
+    }()
+
+    private lazy var skipForwardButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.setImage(UIImage(systemName: "goforward.30", withConfiguration: UIImage.SymbolConfiguration(pointSize: 28)), for: .normal)
+        button.tintColor = primaryColor
+        button.addTarget(self, action: #selector(skipForward), for: .touchUpInside)
         button.translatesAutoresizingMaskIntoConstraints = false
         return button
     }()
 
     private lazy var progressSlider: UISlider = {
         let slider = UISlider()
+        slider.minimumTrackTintColor = UIColor(red: 0xD4/255.0, green: 0xC4/255.0, blue: 0xA8/255.0, alpha: 1.0)
+        slider.maximumTrackTintColor = UIColor(red: 0x6D/255.0, green: 0x7B/255.0, blue: 0x7C/255.0, alpha: 1.0)
+        slider.thumbTintColor = primaryColor
         slider.addTarget(self, action: #selector(sliderValueChanged), for: .valueChanged)
         slider.translatesAutoresizingMaskIntoConstraints = false
         return slider
@@ -32,7 +127,8 @@ final class AudiobookViewController: ReaderViewController {
     private lazy var currentTimeLabel: UILabel = {
         let label = UILabel()
         label.font = .systemFont(ofSize: 12)
-        label.textColor = .darkGray
+        label.textColor = secondaryColor
+        label.text = "0:00"
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }()
@@ -40,7 +136,9 @@ final class AudiobookViewController: ReaderViewController {
     private lazy var durationLabel: UILabel = {
         let label = UILabel()
         label.font = .systemFont(ofSize: 12)
-        label.textColor = .darkGray
+        label.textColor = secondaryColor
+        label.textAlignment = .right
+        label.text = "0:00"
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }()
@@ -50,12 +148,33 @@ final class AudiobookViewController: ReaderViewController {
         locator: Locator?,
         bookId: String
     ) throws {
-        // Create a simple navigator that doesn't display anything
-        // The audio playback will be handled by AVPlayer
-        let navigator = SimpleNavigator(publication: publication)
+        // Extract metadata from publication
+        self.bookTitle = publication.metadata.title
+        self.bookAuthor = publication.metadata.authors.first?.name ?? "Unknown"
+
+        // Get cover image URL if available
+        if let coverLink = publication.links.first(where: { $0.rels.contains("cover") }) {
+            self.coverImageURL = coverLink.url(relativeTo: publication.baseURL)
+        }
+
+        // Create Readium's AudioNavigator (handles LCP decryption properly)
+        let audioNavigator = _AudioNavigator(
+            publication: publication,
+            initialLocation: locator,
+            audioConfig: AudioSession.Configuration(
+                category: .playback,
+                mode: .default,
+                routeSharingPolicy: .longFormAudio,
+                options: []
+            )
+        )
+        self.audioNavigator = audioNavigator
+
+        // Create wrapper view controller for the navigator
+        let navigatorWrapper = AudioNavigatorWrapper(audioNavigator: audioNavigator)
 
         super.init(
-            navigator: navigator,
+            navigator: navigatorWrapper,
             publication: publication,
             bookId: bookId
         )
@@ -70,115 +189,235 @@ final class AudiobookViewController: ReaderViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
 
-        view.backgroundColor = .systemBackground
+        view.backgroundColor = backgroundColor
         setupUI()
+        loadMetadata()
+    }
+
+    private func loadMetadata() {
+        // Set title and author
+        titleLabel.text = bookTitle
+        authorLabel.text = bookAuthor
+
+        // Load cover image if available
+        if let coverURL = coverImageURL {
+            loadCoverImage(from: coverURL)
+        } else {
+            // Show placeholder emoji if no cover
+            let label = UILabel()
+            label.text = "🎧"
+            label.font = .systemFont(ofSize: 80)
+            label.textAlignment = .center
+            label.frame = coverImageView.bounds
+            label.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            coverImageView.addSubview(label)
+        }
+    }
+
+    private func loadCoverImage(from url: URL) {
+        URLSession.shared.dataTask(with: url) { [weak self] data, _, error in
+            guard let data = data, error == nil, let image = UIImage(data: data) else {
+                return
+            }
+            DispatchQueue.main.async {
+                self?.coverImageView.image = image
+            }
+        }.resume()
     }
 
     private func setupUI() {
-        // Add playback controls
-        view.addSubview(playPauseButton)
+        // Add loading UI
+        view.addSubview(loadingContainer)
+        loadingContainer.addSubview(activityIndicator)
+        loadingContainer.addSubview(loadingLabel)
+        loadingContainer.addSubview(progressView)
+
+        // Add player UI (hidden initially)
+        view.addSubview(coverImageView)
+        view.addSubview(titleLabel)
+        view.addSubview(authorLabel)
         view.addSubview(progressSlider)
         view.addSubview(currentTimeLabel)
         view.addSubview(durationLabel)
+        view.addSubview(skipBackButton)
+        view.addSubview(playPauseButton)
+        view.addSubview(skipForwardButton)
+
+        coverImageView.alpha = 0
+        titleLabel.alpha = 0
+        authorLabel.alpha = 0
+        playPauseButton.alpha = 0
+        skipBackButton.alpha = 0
+        skipForwardButton.alpha = 0
+        progressSlider.alpha = 0
+        currentTimeLabel.alpha = 0
+        durationLabel.alpha = 0
 
         NSLayoutConstraint.activate([
-            playPauseButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            playPauseButton.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            playPauseButton.widthAnchor.constraint(equalToConstant: 80),
-            playPauseButton.heightAnchor.constraint(equalToConstant: 80),
+            // Loading container
+            loadingContainer.topAnchor.constraint(equalTo: view.topAnchor),
+            loadingContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            loadingContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            loadingContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor),
 
-            progressSlider.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
-            progressSlider.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
-            progressSlider.topAnchor.constraint(equalTo: playPauseButton.bottomAnchor, constant: 40),
+            activityIndicator.centerXAnchor.constraint(equalTo: loadingContainer.centerXAnchor),
+            activityIndicator.centerYAnchor.constraint(equalTo: loadingContainer.centerYAnchor, constant: -40),
+
+            loadingLabel.topAnchor.constraint(equalTo: activityIndicator.bottomAnchor, constant: 20),
+            loadingLabel.leadingAnchor.constraint(equalTo: loadingContainer.leadingAnchor, constant: 40),
+            loadingLabel.trailingAnchor.constraint(equalTo: loadingContainer.trailingAnchor, constant: -40),
+
+            progressView.topAnchor.constraint(equalTo: loadingLabel.bottomAnchor, constant: 16),
+            progressView.leadingAnchor.constraint(equalTo: loadingContainer.leadingAnchor, constant: 40),
+            progressView.trailingAnchor.constraint(equalTo: loadingContainer.trailingAnchor, constant: -40),
+
+            // Cover art
+            coverImageView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            coverImageView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 80),
+            coverImageView.widthAnchor.constraint(equalToConstant: 280),
+            coverImageView.heightAnchor.constraint(equalToConstant: 280),
+
+            // Title and author
+            titleLabel.topAnchor.constraint(equalTo: coverImageView.bottomAnchor, constant: 24),
+            titleLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 32),
+            titleLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -32),
+
+            authorLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 8),
+            authorLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 32),
+            authorLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -32),
+
+            // Progress slider
+            progressSlider.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 32),
+            progressSlider.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -32),
+            progressSlider.topAnchor.constraint(equalTo: authorLabel.bottomAnchor, constant: 32),
 
             currentTimeLabel.leadingAnchor.constraint(equalTo: progressSlider.leadingAnchor),
             currentTimeLabel.topAnchor.constraint(equalTo: progressSlider.bottomAnchor, constant: 8),
 
             durationLabel.trailingAnchor.constraint(equalTo: progressSlider.trailingAnchor),
             durationLabel.topAnchor.constraint(equalTo: progressSlider.bottomAnchor, constant: 8),
+
+            // Playback controls
+            playPauseButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            playPauseButton.topAnchor.constraint(equalTo: currentTimeLabel.bottomAnchor, constant: 32),
+            playPauseButton.widthAnchor.constraint(equalToConstant: 80),
+            playPauseButton.heightAnchor.constraint(equalToConstant: 80),
+
+            skipBackButton.trailingAnchor.constraint(equalTo: playPauseButton.leadingAnchor, constant: -32),
+            skipBackButton.centerYAnchor.constraint(equalTo: playPauseButton.centerYAnchor),
+            skipBackButton.widthAnchor.constraint(equalToConstant: 44),
+            skipBackButton.heightAnchor.constraint(equalToConstant: 44),
+
+            skipForwardButton.leadingAnchor.constraint(equalTo: playPauseButton.trailingAnchor, constant: 32),
+            skipForwardButton.centerYAnchor.constraint(equalTo: playPauseButton.centerYAnchor),
+            skipForwardButton.widthAnchor.constraint(equalToConstant: 44),
+            skipForwardButton.heightAnchor.constraint(equalToConstant: 44),
         ])
+
+        // Start loading animation
+        activityIndicator.startAnimating()
     }
 
     private func setupAudioPlayer() {
-        // Get the first audio resource from the reading order
-        // readingOrder returns Link? so we just use .first directly
-        guard let audioLink = publication.readingOrder.first else {
-            print("[Audiobook] No audio resource found in reading order")
+        print("[Audiobook] Using _AudioNavigator for playback...")
+
+        guard let navigator = audioNavigator else {
+            print("[Audiobook] ❌ No audio navigator")
             return
         }
 
-        print("[Audiobook] Found audio resource:", audioLink.href)
-        print("[Audiobook] Media type:", audioLink.mediaType.string)
+        navigator.delegate = self
 
-        // Get the absolute URL for the resource
-        // The publication server will serve it with LCP decryption
-        guard let url = audioLink.url(relativeTo: publication.baseURL) else {
-            print("[Audiobook] Failed to get resource URL")
-            return
+        // Configure audio session
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            try? audioSession.setActive(false)
+            try audioSession.setCategory(.playback, mode: .default)
+            try audioSession.setActive(true)
+            print("[Audiobook] ✅ Audio session activated")
+        } catch {
+            print("[Audiobook] ❌ Audio session error:", error)
         }
 
-        print("[Audiobook] Resource URL:", url)
-        createPlayerWithURL(url)
-    }
+        // Show UI after short delay, then auto-play
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.hideLoadingAndShowPlayer()
 
-    private func createPlayerWithURL(_ url: URL) {
-        print("[Audiobook] Creating player with URL:", url.absoluteString)
-
-        // Create AVPlayer with the resource URL
-        // The PublicationServer will handle LCP decryption when the resource is accessed
-        playerItem = AVPlayerItem(url: url)
-        player = AVPlayer(playerItem: playerItem)
-
-        // Update duration label when asset is loaded
-        playerItem?.asset.loadValuesAsynchronously(forKeys: ["duration"]) { [weak self] in
-            DispatchQueue.main.async {
-                guard let self = self else { return }
-                if let duration = self.playerItem?.asset.duration.seconds, !duration.isNaN {
-                    self.durationLabel.text = self.formatTime(duration)
-                    self.progressSlider.maximumValue = Float(duration)
-                    print("[Audiobook] Duration loaded:", duration)
-                }
+            // Auto-play
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                guard let nav = self?.audioNavigator else { return }
+                nav.play()
+                print("[Audiobook] ▶️ Started playback via AudioNavigator")
             }
         }
-
-        // Add time observer to update progress
-        let interval = CMTime(seconds: 0.5, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
-        timeObserver = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
-            self?.updateProgress(time)
-        }
-
-        print("[Audiobook] Player ready")
     }
 
-    private func updateProgress(_ time: CMTime) {
-        let currentTime = time.seconds
-        guard !currentTime.isNaN else { return }
+    // MARK: - _AudioNavigatorDelegate
 
-        currentTimeLabel.text = formatTime(currentTime)
-        progressSlider.value = Float(currentTime)
+    func navigator(_ navigator: _MediaNavigator, playbackDidChange info: MediaPlaybackInfo) {
+        print("[Audiobook] 📊 Playback:", info.state, "time:", info.time)
 
-        // Update locator for progress saving
-        if let duration = playerItem?.duration.seconds, !duration.isNaN, duration > 0 {
-            _ = currentTime / duration
-            // TODO: Create and emit proper audiobook locator with progression
+        // Update UI
+        currentTimeLabel.text = formatTime(info.time)
+        if let duration = info.duration {
+            durationLabel.text = formatTime(duration)
+            progressSlider.maximumValue = Float(duration)
+        }
+        progressSlider.value = Float(info.time)
+
+        // Update button
+        let isPlaying = info.state == .playing
+        let icon = isPlaying ? "pause.circle.fill" : "play.circle.fill"
+        playPauseButton.setImage(
+            UIImage(systemName: icon, withConfiguration: UIImage.SymbolConfiguration(pointSize: 48)),
+            for: .normal
+        )
+    }
+
+    private func hideLoadingAndShowPlayer() {
+        UIView.animate(withDuration: 0.3) {
+            self.loadingContainer.alpha = 0
+            self.coverImageView.alpha = 1
+            self.titleLabel.alpha = 1
+            self.authorLabel.alpha = 1
+            self.playPauseButton.alpha = 1
+            self.skipBackButton.alpha = 1
+            self.skipForwardButton.alpha = 1
+            self.progressSlider.alpha = 1
+            self.currentTimeLabel.alpha = 1
+            self.durationLabel.alpha = 1
+        } completion: { _ in
+            self.loadingContainer.removeFromSuperview()
+            self.activityIndicator.stopAnimating()
         }
     }
 
     @objc private func togglePlayPause() {
-        guard let player = player else { return }
+        guard let navigator = audioNavigator else { return }
 
-        if player.timeControlStatus == .playing {
-            player.pause()
-            playPauseButton.setImage(UIImage(systemName: "play.circle.fill"), for: .normal)
+        if navigator.playbackInfo.state == .playing {
+            navigator.pause()
         } else {
-            player.play()
-            playPauseButton.setImage(UIImage(systemName: "pause.circle.fill"), for: .normal)
+            navigator.play()
         }
     }
 
+    @objc private func skipBackward() {
+        guard let navigator = audioNavigator else { return }
+        let currentTime = navigator.playbackInfo.time
+        navigator.seek(to: max(currentTime - 15, 0))
+    }
+
+    @objc private func skipForward() {
+        guard let navigator = audioNavigator else { return }
+        let currentTime = navigator.playbackInfo.time
+        let duration = navigator.playbackInfo.duration ?? 0
+        navigator.seek(to: min(currentTime + 30, duration))
+    }
+
     @objc private func sliderValueChanged() {
-        let newTime = CMTime(seconds: Double(progressSlider.value), preferredTimescale: CMTimeScale(NSEC_PER_SEC))
-        player?.seek(to: newTime)
+        guard let navigator = audioNavigator else { return }
+        navigator.seek(to: Double(progressSlider.value))
     }
 
     private func formatTime(_ seconds: Double) -> String {
@@ -195,26 +434,26 @@ final class AudiobookViewController: ReaderViewController {
     }
 
     deinit {
-        if let observer = timeObserver {
-            player?.removeTimeObserver(observer)
-        }
-        player?.pause()
+        audioNavigator?.pause()
     }
 }
 
-// MARK: - Simple Navigator for Audiobooks
+// MARK: - Audio Navigator Wrapper
 
-/// A simple navigator that conforms to Navigator protocol but doesn't display anything
-/// The actual audio playback is handled by AVPlayer in AudiobookViewController
-private class SimpleNavigator: UIViewController, Navigator {
-    let publication: Publication
-    var currentLocation: Locator? {
-        // Return first item in reading order
-        return publication.readingOrder.first.flatMap { publication.locate($0) }
+/// Wrapper to make AudioNavigator conform to UIViewController & Navigator
+private class AudioNavigatorWrapper: UIViewController, Navigator {
+    let audioNavigator: _AudioNavigator
+
+    var publication: Publication {
+        return audioNavigator.publication
     }
 
-    init(publication: Publication) {
-        self.publication = publication
+    var currentLocation: Locator? {
+        return audioNavigator.currentLocation
+    }
+
+    init(audioNavigator: _AudioNavigator) {
+        self.audioNavigator = audioNavigator
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -223,22 +462,18 @@ private class SimpleNavigator: UIViewController, Navigator {
     }
 
     func go(to locator: Locator, animated: Bool, completion: @escaping () -> Void) -> Bool {
-        completion()
-        return true
+        return audioNavigator.go(to: locator, animated: animated, completion: completion)
     }
 
     func go(to link: Link, animated: Bool, completion: @escaping () -> Void) -> Bool {
-        completion()
-        return true
+        return audioNavigator.go(to: link, animated: animated, completion: completion)
     }
 
     func goForward(animated: Bool, completion: @escaping () -> Void) -> Bool {
-        completion()
-        return true
+        return audioNavigator.goForward(animated: animated, completion: completion)
     }
 
     func goBackward(animated: Bool, completion: @escaping () -> Void) -> Bool {
-        completion()
-        return true
+        return audioNavigator.goBackward(animated: animated, completion: completion)
     }
 }

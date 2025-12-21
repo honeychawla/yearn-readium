@@ -146,6 +146,15 @@ final class ReaderService: Loggable {
         ) { result in
           switch result {
           case .success(let publication):
+            // Add publication to server to serve decrypted resources
+            if let server = self.app?.publicationServer {
+              do {
+                try server.add(publication)
+                print("[PublicationServer] Added publication to server, base URL:", publication.baseURL ?? "nil")
+              } catch {
+                print("[PublicationServer] Warning: Failed to add publication to server:", error)
+              }
+            }
             promise(.success((publication, mediaType)))
           case .failure(let error):
             promise(.failure(.openFailed(error)))

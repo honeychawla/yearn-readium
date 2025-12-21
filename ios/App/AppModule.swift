@@ -25,11 +25,15 @@ final class AppModule {
   // LCP service
   var lcpService: LCPService?
 
+  // Publication server to serve decrypted content
+  var publicationServer: PublicationServer?
+
   init() throws {
     guard let server = PublicationServer() else {
       /// FIXME: we should recover properly if the publication server can't start, maybe this should only forbid opening a publication?
       fatalError("Can't start publication server")
     }
+    self.publicationServer = server
 
     // Initialize LCP service with R2LCPClient
     let lcpClient = LCPClientImpl()
