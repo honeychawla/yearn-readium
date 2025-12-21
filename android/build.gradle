@@ -53,9 +53,30 @@ android {
   }
 }
 
+// Avoid Gradle caching issues with liblcp
+configurations.all {
+  resolutionStrategy.cacheDynamicVersionsFor 0, 'seconds'
+  resolutionStrategy.cacheChangingModulesFor 0, 'seconds'
+}
+
+task clearLiblcpCache(type: Delete) {
+  delete "${System.getProperty('user.home')}/.gradle/caches/modules-2/files-2.1/readium/liblcp"
+}
+
+preBuild.dependsOn clearLiblcpCache
+
 repositories {
   mavenCentral()
   google()
+
+  // EDRLab repository for LCP test library
+  ivy {
+    url = uri("https://lcplibs.edrlab.org")
+    patternLayout {
+      artifact("/[organisation]/[module]/android/aar/test/4.2.0.[ext]")
+    }
+    metadataSources { artifact() }
+  }
 
   def found = false
   def defaultDir = null
@@ -138,6 +159,10 @@ dependencies {
     // transitive deps to avoid potential collisions with other projects.
     exclude group: "com.google.android.exoplayer"
   }
+  implementation "org.readium.kotlin-toolkit:readium-lcp:$readium_version"
+
+  // EDRLab LCP test library (local AAR) - 4.1.0 to match iOS
+  implementation files('libs/liblcp-4.1.0.aar')
 
   // other deps
   implementation "androidx.core:core-ktx:1.7.0"

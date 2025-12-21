@@ -97,13 +97,16 @@ class ReadiumViewManager(
     val path = (file.getString("url") ?: "")
       .replace("^(file:/+)?(/.*)$".toRegex(), "$2")
     val location = file.getMap("initialLocation")
+    val lcpPassphrase = file.getString("lcpPassphrase")
     var initialLocation: LinkOrLocator? = null
+
+    android.util.Log.d("ReadiumViewManager", "[LCP] setFile called - passphrase: ${if (lcpPassphrase != null) "PROVIDED" else "NULL"}")
 
     if (location != null) {
       initialLocation = locationToLinkOrLocator(location)
     }
 
-    view.file = File(path, initialLocation)
+    view.file = File(path, initialLocation, lcpPassphrase)
     this.buildForViewIfReady(view)
   }
 
@@ -163,9 +166,11 @@ class ReadiumViewManager(
 
   private fun buildForViewIfReady(view: ReadiumView) {
     var file = view.file
+    android.util.Log.d("ReadiumViewManager", "[LCP] buildForViewIfReady - file: ${file != null}, initialized: ${view.isViewInitialized}")
     if (file != null && view.isViewInitialized) {
+      android.util.Log.d("ReadiumViewManager", "[LCP] Calling openPublication with passphrase: ${if (file.lcpPassphrase != null) "PROVIDED" else "NULL"}")
       runBlocking {
-        svc.openPublication(file.path, file.initialLocation) { fragment ->
+        svc.openPublication(file.path, file.initialLocation, file.lcpPassphrase) { fragment ->
           view.addFragment(fragment)
         }
       }
