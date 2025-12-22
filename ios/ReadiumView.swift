@@ -1,9 +1,9 @@
 import Combine
 import Foundation
-import R2Shared
-import R2Streamer
+import ReadiumShared
+import ReadiumStreamer
 import UIKit
-import R2Navigator
+import ReadiumNavigator
 
 
 class ReadiumView : UIView, Loggable {
@@ -81,10 +81,9 @@ class ReadiumView : UIView, Loggable {
       return;
     }
 
-    navigator.go(
-      to: locator,
-      animated: true
-    )
+    Task {
+      await navigator.go(to: locator)
+    }
   }
 
   func updatePreferences(_ preferences: NSString?) {
@@ -227,11 +226,16 @@ class ReadiumView : UIView, Loggable {
     rootView.leftAnchor.constraint(equalTo: self.leftAnchor).isActive = true
     rootView.rightAnchor.constraint(equalTo: self.rightAnchor).isActive = true
 
-    self.onTableOfContents?([
-      "toc": vc.publication.tableOfContents.map({ link in
-        return link.json
-      })
-    ])
+    Task {
+      let toc = await vc.publication.tableOfContents()
+      await MainActor.run {
+        self.onTableOfContents?([
+          "toc": toc.map({ link in
+            return link.json
+          })
+        ])
+      }
+    }
 
     // Apply decorations if they were set before view controller was ready
     if decorations != nil {

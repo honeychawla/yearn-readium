@@ -1,6 +1,6 @@
 import Combine
 import Foundation
-import R2Shared
+import ReadiumShared
 
 final class Paths {
   private init() {}
@@ -32,21 +32,23 @@ final class Paths {
         promise(.success(source))
       } else {
         let title = title.takeIf { !$0.isEmpty } ?? UUID().uuidString
-        let ext = mediaType.fileExtension?.addingPrefix(".") ?? ""
+        let ext = (mediaType.fileExtension.map { ".\($0)" }) ?? ""
         let filename = "\(title)\(ext)".sanitizedPathComponent
-        promise(.success(documents.appendingUniquePathComponent(filename)))
+        let uniqueURL = documents.appendingPathComponent(filename + "_" + UUID().uuidString)
+        promise(.success(uniqueURL))
       }
     }.eraseToAnyPublisher()
   }
 
   static func makeTemporaryURL() -> AnyPublisher<URL, Never> {
     Future(on: .global()) { promise in
-      promise(.success(temporary.appendingUniquePathComponent()))
+      let uniqueURL = temporary.appendingPathComponent(UUID().uuidString)
+      promise(.success(uniqueURL))
     }.eraseToAnyPublisher()
   }
 
   /// Returns whether the given `url` locates a file that is under the app's home directory.
   static func isAppFile(at url: URL) -> Bool {
-    home.isParentOf(url)
+    url.path.hasPrefix(home.path)
   }
 }

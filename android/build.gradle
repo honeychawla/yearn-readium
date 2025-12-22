@@ -162,7 +162,7 @@ dependencies {
   implementation "org.readium.kotlin-toolkit:readium-lcp:$readium_version"
 
   // EDRLab LCP test library (local AAR) - 4.1.0 to match iOS
-  implementation files('libs/liblcp-4.1.0.aar')
+  // implementation files('libs/liblcp-4.1.0.aar')
 
   // other deps
   implementation "androidx.core:core-ktx:1.7.0"

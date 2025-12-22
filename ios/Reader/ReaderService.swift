@@ -1,13 +1,14 @@
 import Combine
 import Foundation
-import R2Shared
-import R2Streamer
+import ReadiumShared
+import ReadiumStreamer
 import ReadiumLCP
 import UIKit
 
 final class ReaderService: Loggable {
   var app: AppModule?
-  var streamer: Streamer
+  var assetRetriever: AssetRetriever
+  var publicationOpener: PublicationOpener?
   private var subscriptions = Set<AnyCancellable>()
   var lcpPassphrase: String? = nil
 
@@ -15,13 +16,13 @@ final class ReaderService: Loggable {
     do {
       self.app = try AppModule()
 
-      // Streamer will be recreated with proper auth when opening a book
-      self.streamer = Streamer()
-      print("[LCP] Streamer initialized (will add LCP when passphrase is available)")
+      // Initialize AssetRetriever
+      self.assetRetriever = AssetRetriever(httpClient: DefaultHTTPClient())
+      print("[Readium] AssetRetriever initialized")
     } catch {
       print("TODO: An error occurred instantiating the ReaderService")
       print(error)
-      self.streamer = Streamer()
+      self.assetRetriever = AssetRetriever(httpClient: DefaultHTTPClient())
     }
   }
   
@@ -48,11 +49,13 @@ final class ReaderService: Loggable {
         return nil
       }
 
-      return publication.locate(link)
+      // Note: locate() is async in Readium 3.x, but this function is sync
+      // For now, just return the first locator for the link
+      return publication.readingOrder.first(where: { $0.href == link.href }).map { publication.locator(from: $0) }
     } else {
       return try? Locator(json: location)
     }
-    
+
     return nil
   }
 
@@ -67,115 +70,109 @@ final class ReaderService: Loggable {
     // Store the hashed passphrase for this book
     self.lcpPassphrase = lcpPassphrase
 
-    // Recreate streamer with LCP authentication if passphrase is provided
+    // Create PublicationOpener with LCP authentication
     if let passphrase = lcpPassphrase, let lcpService = self.app?.lcpService {
-      print("[LCP] ✅ Creating streamer with automatic authentication")
+      print("[LCP] ✅ Creating publication opener with automatic authentication")
       print("[LCP] Hashed passphrase: \(passphrase.prefix(16))...")
 
-      // Create authentication that will provide the hashed passphrase automatically
       let authentication = LCPPassphraseAuthentication(passphrase)
 
-      // Recreate streamer with this authentication
-      self.streamer = Streamer(
+      self.publicationOpener = PublicationOpener(
+        parser: DefaultPublicationParser(
+          httpClient: DefaultHTTPClient(),
+          assetRetriever: assetRetriever,
+          pdfFactory: DefaultPDFDocumentFactory()
+        ),
         contentProtections: [lcpService.contentProtection(with: authentication)]
       )
     } else if let lcpService = self.app?.lcpService {
-      // No passphrase - use default dialog authentication
-      print("[LCP] No passphrase provided - will prompt user if needed")
-      self.streamer = Streamer(
-        contentProtections: [lcpService.contentProtection()]
+      print("[LCP] No passphrase - using dialog authentication")
+
+      self.publicationOpener = PublicationOpener(
+        parser: DefaultPublicationParser(
+          httpClient: DefaultHTTPClient(),
+          assetRetriever: assetRetriever,
+          pdfFactory: DefaultPDFDocumentFactory()
+        ),
+        contentProtections: [lcpService.contentProtection(with: LCPDialogAuthentication())]
       )
     }
 
     guard let reader = self.app?.reader else { return }
-    self.url(path: url)
-      .flatMap { self.openPublication(at: $0, allowUserInteraction: false, sender: sender ) }
-      .flatMap { (pub, _) in self.checkIsReadable(publication: pub) }
-      .sink(
-        receiveCompletion: { error in
-          print(">>>>>>>>>>> TODO: handle me", error)
-        },
-        receiveValue: { pub in
-          let locator: Locator? = ReaderService.locatorFromLocation(location, pub)
-          let vc = reader.getViewController(
-            for: pub,
-            bookId: bookId,
-            locator: locator
-          )
 
-          if (vc != nil) {
-            completion(vc!)
+    Task {
+      do {
+        let fileURL = try self.getFileURL(path: url)
+        let asset = try await self.retrieveAsset(at: fileURL)
+        let publication = try await self.openPublication(asset: asset, sender: sender)
+
+        guard !publication.isRestricted else {
+          if let error = publication.protectionError {
+            print(">>>>>>>>>>> Publication is restricted:", error)
           }
-        }
-      )
-      .store(in: &subscriptions)
-  }
-
-  func url(path: String) -> AnyPublisher<URL, ReaderError> {
-    // Absolute URL.
-    if let url = URL(string: path), url.scheme != nil {
-      return .just(url)
-    }
-
-    // Absolute file path.
-    if path.hasPrefix("/") {
-      return .just(URL(fileURLWithPath: path))
-    }
-
-    return .fail(ReaderError.fileNotFound(fatalError("Unable to locate file: " + path)))
-  }
-
-  private func openPublication(
-    at url: URL,
-    allowUserInteraction: Bool,
-    sender: UIViewController?
-  ) -> AnyPublisher<(Publication, MediaType), ReaderError> {
-    let openFuture = Future<(Publication, MediaType), ReaderError>(
-      on: .global(),
-      { promise in
-        let asset = FileAsset(url: url)
-        guard let mediaType = asset.mediaType() else {
-          promise(.failure(.openFailed(Publication.OpeningError.unsupportedFormat)))
           return
         }
 
-        self.streamer.open(
-          asset: asset,
-          allowUserInteraction: allowUserInteraction,
-          sender: sender
-        ) { result in
-          switch result {
-          case .success(let publication):
-            // Add publication to server to serve decrypted resources
-            if let server = self.app?.publicationServer {
-              do {
-                try server.add(publication)
-                print("[PublicationServer] Added publication to server, base URL:", publication.baseURL ?? "nil")
-              } catch {
-                print("[PublicationServer] Warning: Failed to add publication to server:", error)
-              }
-            }
-            promise(.success((publication, mediaType)))
-          case .failure(let error):
-            promise(.failure(.openFailed(error)))
-          case .cancelled:
-            promise(.failure(.cancelled))
+        await MainActor.run {
+          let locator: Locator? = ReaderService.locatorFromLocation(location, publication)
+          if let vc = reader.getViewController(for: publication, bookId: bookId, locator: locator) {
+            completion(vc)
           }
         }
-      }
-    )
-
-    return openFuture.eraseToAnyPublisher()
-  }
-
-  private func checkIsReadable(publication: Publication) -> AnyPublisher<Publication, ReaderError> {
-    guard !publication.isRestricted else {
-      if let error = publication.protectionError {
-        return .fail(.openFailed(error))
-      } else {
-        return .fail(.cancelled)
+      } catch {
+        print(">>>>>>>>>>> Error opening publication:", error)
       }
     }
-    return .just(publication)
+  }
+
+  private func getFileURL(path: String) throws -> FileURL {
+    // Absolute URL
+    if let url = URL(string: path), url.scheme != nil {
+      guard let fileURL = FileURL(url: url) else {
+        throw ReaderError.fileNotFound(NSError(domain: "ReaderService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid URL: " + path]))
+      }
+      return fileURL
+    }
+
+    // Absolute file path
+    if path.hasPrefix("/") {
+      guard let fileURL = FileURL(path: path) else {
+        throw ReaderError.fileNotFound(NSError(domain: "ReaderService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid file path: " + path]))
+      }
+      return fileURL
+    }
+
+    throw ReaderError.fileNotFound(NSError(domain: "ReaderService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Unable to locate file: " + path]))
+  }
+
+  private func retrieveAsset(at url: FileURL) async throws -> Asset {
+    let result = await assetRetriever.retrieve(url: url)
+
+    switch result {
+    case .success(let asset):
+      return asset
+    case .failure(let error):
+      throw ReaderError.openFailed(error)
+    }
+  }
+
+  private func openPublication(asset: Asset, sender: UIViewController?) async throws -> Publication {
+    guard let opener = publicationOpener else {
+      throw ReaderError.openFailed(NSError(domain: "ReaderService", code: -1, userInfo: [NSLocalizedDescriptionKey: "No publication opener"]))
+    }
+
+    let result = await opener.open(
+      asset: asset,
+      allowUserInteraction: false,
+      sender: sender
+    )
+
+    switch result {
+    case .success(let publication):
+      print("[Publication] Opened successfully")
+      return publication
+    case .failure(let error):
+      throw ReaderError.openFailed(error)
+    }
   }
 }

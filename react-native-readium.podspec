@@ -19,11 +19,12 @@ Pod::Spec.new do |s|
   s.swift_version = "5.0"
 
   s.dependency "React-Core"
-  s.dependency "R2Shared"
-  s.dependency "R2Streamer"
-  s.dependency "R2Navigator"
+  s.dependency "ReadiumShared"
+  s.dependency "ReadiumStreamer"
+  s.dependency "ReadiumNavigator"
   s.dependency "ReadiumLCP"
+  s.dependency "ReadiumAdapterLCPSQLite"
   s.dependency "R2LCPClient"
-  s.dependency "GCDWebServer"
+  s.dependency "ReadiumGCDWebServer"
   s.dependency "ReadiumAdapterGCDWebServer"
 end

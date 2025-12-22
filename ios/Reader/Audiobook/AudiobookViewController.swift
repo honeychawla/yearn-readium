@@ -1,14 +1,14 @@
 import AVFoundation
 import Combine
 import Foundation
-import R2Navigator
-import R2Shared
+import ReadiumNavigator
+import ReadiumShared
 import UIKit
 
 /// View controller for playing LCP-protected audiobooks
-final class AudiobookViewController: ReaderViewController, _AudioNavigatorDelegate {
+final class AudiobookViewController: ReaderViewController, AudioNavigatorDelegate {
 
-    private var audioNavigator: _AudioNavigator?
+    private var audioNavigator: AudioNavigator?
 
     // Book metadata
     private var bookTitle: String
@@ -158,15 +158,9 @@ final class AudiobookViewController: ReaderViewController, _AudioNavigatorDelega
         }
 
         // Create Readium's AudioNavigator (handles LCP decryption properly)
-        let audioNavigator = _AudioNavigator(
+        let audioNavigator = AudioNavigator(
             publication: publication,
-            initialLocation: locator,
-            audioConfig: AudioSession.Configuration(
-                category: .playback,
-                mode: .default,
-                routeSharingPolicy: .longFormAudio,
-                options: []
-            )
+            initialLocation: locator
         )
         self.audioNavigator = audioNavigator
 
@@ -319,7 +313,7 @@ final class AudiobookViewController: ReaderViewController, _AudioNavigatorDelega
     }
 
     private func setupAudioPlayer() {
-        print("[Audiobook] Using _AudioNavigator for playback...")
+        print("[Audiobook] Using AudioNavigator for playback...")
 
         guard let navigator = audioNavigator else {
             print("[Audiobook] ❌ No audio navigator")
@@ -352,9 +346,9 @@ final class AudiobookViewController: ReaderViewController, _AudioNavigatorDelega
         }
     }
 
-    // MARK: - _AudioNavigatorDelegate
+    // MARK: - AudioNavigatorDelegate
 
-    func navigator(_ navigator: _MediaNavigator, playbackDidChange info: MediaPlaybackInfo) {
+    func navigator(_ navigator: AudioNavigator, playbackDidChange info: MediaPlaybackInfo) {
         print("[Audiobook] 📊 Playback:", info.state, "time:", info.time)
 
         // Update UI
@@ -442,7 +436,7 @@ final class AudiobookViewController: ReaderViewController, _AudioNavigatorDelega
 
 /// Wrapper to make AudioNavigator conform to UIViewController & Navigator
 private class AudioNavigatorWrapper: UIViewController, Navigator {
-    let audioNavigator: _AudioNavigator
+    let audioNavigator: AudioNavigator
 
     var publication: Publication {
         return audioNavigator.publication
@@ -452,7 +446,7 @@ private class AudioNavigatorWrapper: UIViewController, Navigator {
         return audioNavigator.currentLocation
     }
 
-    init(audioNavigator: _AudioNavigator) {
+    init(audioNavigator: AudioNavigator) {
         self.audioNavigator = audioNavigator
         super.init(nibName: nil, bundle: nil)
     }

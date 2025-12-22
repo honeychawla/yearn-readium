@@ -1,8 +1,8 @@
 import Combine
 import SafariServices
 import UIKit
-import R2Navigator
-import R2Shared
+import ReadiumNavigator
+import ReadiumShared
 import SwiftSoup
 import WebKit
 
@@ -206,11 +206,15 @@ class ReaderViewController: UIViewController, Loggable {
   }
 
   @objc private func goBackward() {
-    navigator.goBackward()
+    Task {
+      await navigator.goBackward()
+    }
   }
 
   @objc private func goForward() {
-    navigator.goForward()
+    Task {
+      await navigator.goForward()
+    }
   }
 
 }
@@ -218,15 +222,13 @@ class ReaderViewController: UIViewController, Loggable {
 extension ReaderViewController: NavigatorDelegate {
   func navigator(_ navigator: Navigator, locationDidChange locator: Locator) {
     subject.send(locator)
-    positionLabel.text = {
-      if let position = locator.locations.position {
-        return "\(position) / \(publication.positions.count)"
-      } else if let progression = locator.locations.totalProgression {
-        return "\(progression)%"
-      } else {
-        return nil
-      }
-    }()
+
+    // Update position label (positions.count is async in 3.x, skip for now)
+    if let progression = locator.locations.totalProgression {
+      positionLabel.text = "\(Int(progression * 100))%"
+    } else {
+      positionLabel.text = nil
+    }
   }
 
   func navigator(_ navigator: Navigator, presentExternalURL url: URL) {
@@ -291,13 +293,19 @@ extension ReaderViewController: NavigatorDelegate {
 extension ReaderViewController: VisualNavigatorDelegate {
 
     func navigator(_ navigator: VisualNavigator, didTapAt point: CGPoint) {
-        let moved = DirectionalNavigationAdapter(navigator: navigator).didTap(at: point)
-        if !moved {
-            toggleNavigationBar()
+        Task {
+            let moved = await DirectionalNavigationAdapter().didTap(at: point, on: navigator)
+            if !moved {
+                await MainActor.run {
+                    toggleNavigationBar()
+                }
+            }
         }
     }
-    
+
     func navigator(_ navigator: VisualNavigator, didPressKey event: KeyEvent) {
-        DirectionalNavigationAdapter(navigator: navigator).didPressKey(event: event)
+        Task {
+            await DirectionalNavigationAdapter().didPressKey(event, on: navigator)
+        }
     }
 }
