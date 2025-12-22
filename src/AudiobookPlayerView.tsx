@@ -7,6 +7,7 @@ interface AudiobookPlayerViewProps {
     url: string;
     initialLocation?: Locator;
     lcpPassphrase?: string;
+    licensePath?: string;
   };
   style?: ViewStyle;
   onLocationChange?: (event: { nativeEvent: Locator }) => void;

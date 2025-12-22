@@ -1,7 +1,7 @@
 buildscript {
   // Buildscript is evaluated before everything else so we can't use getExtOrDefault
   def kotlin_version = rootProject.ext.has('kotlinVersion') ? rootProject.ext.get('kotlinVersion') : project.properties['Readium_kotlinVersion']
-  ext.readium_version = '2.4.1'
+  ext.readium_version = '3.1.2'
 
   repositories {
     google()
@@ -151,15 +151,16 @@ dependencies {
   api "com.facebook.react:react-native:+"
   implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
 
-  // readium deps
+  // Readium deps - version 3.1.2
   implementation "org.readium.kotlin-toolkit:readium-shared:$readium_version"
   implementation "org.readium.kotlin-toolkit:readium-streamer:$readium_version"
-  implementation ("org.readium.kotlin-toolkit:readium-navigator:$readium_version") {
-    // this package doesn't provide audio playback, so remove exoplayer
-    // transitive deps to avoid potential collisions with other projects.
-    exclude group: "com.google.android.exoplayer"
-  }
+  implementation "org.readium.kotlin-toolkit:readium-navigator:$readium_version"
+  implementation "org.readium.kotlin-toolkit:readium-navigator-media-audio:3.0.3"
   implementation "org.readium.kotlin-toolkit:readium-lcp:$readium_version"
+
+  // ExoPlayer (Media3) for audio playback
+  implementation "androidx.media3:media3-exoplayer:1.2.0"
+  implementation "androidx.media3:media3-ui:1.2.0"
 
   // EDRLab LCP test library (local AAR) - 4.1.0 to match iOS
   // implementation files('libs/liblcp-4.1.0.aar')
