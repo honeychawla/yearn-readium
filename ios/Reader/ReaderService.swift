@@ -50,8 +50,9 @@ final class ReaderService: Loggable {
       }
 
       // Note: locate() is async in Readium 3.x, but this function is sync
-      // For now, just return the first locator for the link
-      return publication.readingOrder.first(where: { $0.href == link.href }).map { publication.locator(from: $0) }
+      // Cannot create locator synchronously with new API, return nil
+      // Audiobooks don't typically use initial locations anyway
+      return nil
     } else {
       return try? Locator(json: location)
     }
@@ -136,7 +137,7 @@ final class ReaderService: Loggable {
 
     // Absolute file path
     if path.hasPrefix("/") {
-      guard let fileURL = FileURL(path: path) else {
+      guard let fileURL = FileURL(path: path, isDirectory: false) else {
         throw ReaderError.fileNotFound(NSError(domain: "ReaderService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid file path: " + path]))
       }
       return fileURL

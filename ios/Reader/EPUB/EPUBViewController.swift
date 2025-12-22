@@ -13,7 +13,8 @@ class EPUBViewController: ReaderViewController {
     init(
       publication: Publication,
       locator: Locator?,
-      bookId: String
+      bookId: String,
+      httpServer: GCDHTTPServer
     ) throws {
       // Create configuration with custom editing actions
       var config = EPUBNavigatorViewController.Configuration()
@@ -25,7 +26,8 @@ class EPUBViewController: ReaderViewController {
       let navigator = try EPUBNavigatorViewController(
         publication: publication,
         initialLocation: locator,
-        config: config
+        config: config,
+        httpServer: httpServer
       )
 
       super.init(

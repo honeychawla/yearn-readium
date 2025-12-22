@@ -5,6 +5,7 @@ import ReadiumShared
 import ReadiumStreamer
 import ReadiumLCP
 import ReadiumAdapterLCPSQLite
+import ReadiumAdapterGCDWebServer
 
 
 /// Base module delegate, that sub-modules' delegate can extend.
@@ -26,20 +27,31 @@ final class AppModule {
   // LCP service
   var lcpService: LCPService?
 
+  // HTTP server for serving publication resources
+  var httpServer: GCDHTTPServer
+
   init() throws {
+    // Initialize shared components
+    let httpClient = DefaultHTTPClient()
+    let assetRetriever = AssetRetriever(httpClient: httpClient)
+
+    // Initialize HTTP server for EPUB resources (starts automatically when needed)
+    httpServer = GCDHTTPServer(assetRetriever: assetRetriever)
+    print("[HTTPServer] Initialized (will start when serving publications)")
+
     // Initialize LCP service with SQLite repositories
     let lcpClient = LCPClientImpl()
-    let httpClient = DefaultHTTPClient()
 
     lcpService = LCPService(
       client: lcpClient,
-      licenseRepository: try SQLiteLCPLicenseRepository(),
-      passphraseRepository: try SQLiteLCPPassphraseRepository(),
+      licenseRepository: try LCPSQLiteLicenseRepository(),
+      passphraseRepository: try LCPSQLitePassphraseRepository(),
+      assetRetriever: assetRetriever,
       httpClient: httpClient
     )
     print("[LCP] Service initialized successfully")
 
-    reader = ReaderModule(delegate: self)
+    reader = ReaderModule(delegate: self, httpServer: httpServer)
   }
 }
 

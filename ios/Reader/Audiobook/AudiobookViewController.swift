@@ -149,12 +149,12 @@ final class AudiobookViewController: ReaderViewController, AudioNavigatorDelegat
         bookId: String
     ) throws {
         // Extract metadata from publication
-        self.bookTitle = publication.metadata.title
+        self.bookTitle = publication.metadata.title ?? "Audiobook"
         self.bookAuthor = publication.metadata.authors.first?.name ?? "Unknown"
 
         // Get cover image URL if available
         if let coverLink = publication.links.first(where: { $0.rels.contains("cover") }) {
-            self.coverImageURL = coverLink.url(relativeTo: publication.baseURL)
+            self.coverImageURL = coverLink.url().url
         }
 
         // Create Readium's AudioNavigator (handles LCP decryption properly)
@@ -399,19 +399,25 @@ final class AudiobookViewController: ReaderViewController, AudioNavigatorDelegat
     @objc private func skipBackward() {
         guard let navigator = audioNavigator else { return }
         let currentTime = navigator.playbackInfo.time
-        navigator.seek(to: max(currentTime - 15, 0))
+        Task {
+            await navigator.seek(to: max(currentTime - 15, 0))
+        }
     }
 
     @objc private func skipForward() {
         guard let navigator = audioNavigator else { return }
         let currentTime = navigator.playbackInfo.time
         let duration = navigator.playbackInfo.duration ?? 0
-        navigator.seek(to: min(currentTime + 30, duration))
+        Task {
+            await navigator.seek(to: min(currentTime + 30, duration))
+        }
     }
 
     @objc private func sliderValueChanged() {
         guard let navigator = audioNavigator else { return }
-        navigator.seek(to: Double(progressSlider.value))
+        Task {
+            await navigator.seek(to: Double(progressSlider.value))
+        }
     }
 
     private func formatTime(_ seconds: Double) -> String {
@@ -456,18 +462,34 @@ private class AudioNavigatorWrapper: UIViewController, Navigator {
     }
 
     func go(to locator: Locator, animated: Bool, completion: @escaping () -> Void) -> Bool {
-        return audioNavigator.go(to: locator, animated: animated, completion: completion)
+        Task {
+            await audioNavigator.go(to: locator)
+            completion()
+        }
+        return true
     }
 
     func go(to link: Link, animated: Bool, completion: @escaping () -> Void) -> Bool {
-        return audioNavigator.go(to: link, animated: animated, completion: completion)
+        Task {
+            await audioNavigator.go(to: link)
+            completion()
+        }
+        return true
     }
 
     func goForward(animated: Bool, completion: @escaping () -> Void) -> Bool {
-        return audioNavigator.goForward(animated: animated, completion: completion)
+        Task {
+            await audioNavigator.goForward()
+            completion()
+        }
+        return true
     }
 
     func goBackward(animated: Bool, completion: @escaping () -> Void) -> Bool {
-        return audioNavigator.goBackward(animated: animated, completion: completion)
+        Task {
+            await audioNavigator.goBackward()
+            completion()
+        }
+        return true
     }
 }

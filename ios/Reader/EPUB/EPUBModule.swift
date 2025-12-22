@@ -3,12 +3,16 @@ import UIKit
 import ReadiumShared
 
 
+import ReadiumAdapterGCDWebServer
+
 final class EPUBModule: ReaderFormatModule {
 
     weak var delegate: ReaderFormatModuleDelegate?
+    let httpServer: GCDHTTPServer
 
-    init(delegate: ReaderFormatModuleDelegate?) {
+    init(delegate: ReaderFormatModuleDelegate?, httpServer: GCDHTTPServer) {
         self.delegate = delegate
+        self.httpServer = httpServer
     }
 
     func supports(_ publication: Publication) -> Bool {
@@ -28,7 +32,8 @@ final class EPUBModule: ReaderFormatModule {
         let epubViewController = try EPUBViewController(
             publication: publication,
             locator: locator,
-            bookId: bookId
+            bookId: bookId,
+            httpServer: httpServer
         )
         epubViewController.moduleDelegate = delegate
         return epubViewController

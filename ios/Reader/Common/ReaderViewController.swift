@@ -294,7 +294,7 @@ extension ReaderViewController: VisualNavigatorDelegate {
 
     func navigator(_ navigator: VisualNavigator, didTapAt point: CGPoint) {
         Task {
-            let moved = await DirectionalNavigationAdapter().didTap(at: point, on: navigator)
+            let moved = await DirectionalNavigationAdapter().didTap(at: point)
             if !moved {
                 await MainActor.run {
                     toggleNavigationBar()
@@ -305,7 +305,7 @@ extension ReaderViewController: VisualNavigatorDelegate {
 
     func navigator(_ navigator: VisualNavigator, didPressKey event: KeyEvent) {
         Task {
-            await DirectionalNavigationAdapter().didPressKey(event, on: navigator)
+            await DirectionalNavigationAdapter().didPressKey(event: event)
         }
     }
 }

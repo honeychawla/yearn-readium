@@ -1,6 +1,7 @@
 import Foundation
 import UIKit
 import ReadiumShared
+import ReadiumAdapterGCDWebServer
 
 
 /// The ReaderModule handles the presentation of publications to be read by the user.
@@ -25,13 +26,14 @@ final class ReaderModule: ReaderModuleAPI {
   var formatModules: [ReaderFormatModule] = []
 
   init(
-    delegate: ReaderModuleDelegate?
+    delegate: ReaderModuleDelegate?,
+    httpServer: GCDHTTPServer
   ) {
     self.delegate = delegate
 
     formatModules = [
       // CBZModule(delegate: self),
-      EPUBModule(delegate: self),
+      EPUBModule(delegate: self, httpServer: httpServer),
       AudiobookModule(delegate: self),
     ]
 
