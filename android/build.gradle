@@ -57,13 +57,23 @@ repositories {
   mavenCentral()
   google()
 
+  // Local libs directory for AAR files
+  flatDir {
+    dirs 'libs'
+  }
+
   // EDRLab LCP library repository
   ivy {
-    url = uri("https://lcplibs.edrlab.org")
+    url "https://lcplibs.edrlab.org"
     patternLayout {
-      artifact("/[organisation]/[module]/android/aar/test/[revision].[ext]")
+      artifact "[organisation]/[module]/android/aar/test/[revision].[ext]"
     }
-    metadataSources { artifact() }
+    metadataSources {
+      artifact()
+    }
+    content {
+      includeGroup "readium"
+    }
   }
 
   def found = false
@@ -150,7 +160,8 @@ dependencies {
   }
 
   // EDRLab LCP Client library (contains liblcp.so native binaries)
-  implementation "readium:liblcp:4.1.0@aar"
+  // Using local AAR file to avoid Ivy repository issues in EAS builds
+  implementation files('libs/liblcp-4.1.0.aar')
 
   // ExoPlayer for LCP-protected audiobook playback (decrypts in-memory, files stay encrypted)
   implementation "com.google.android.exoplayer:exoplayer:2.18.1"

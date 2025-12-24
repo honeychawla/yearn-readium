@@ -32,12 +32,26 @@ final class Paths {
         promise(.success(source))
       } else {
         let title = title.takeIf { !$0.isEmpty } ?? UUID().uuidString
-        let ext = (mediaType.fileExtension.map { ".\($0)" }) ?? ""
+        // MediaType no longer has fileExtension, so we extract from the media type string
+        let ext = Self.fileExtension(for: mediaType)
         let filename = "\(title)\(ext)".sanitizedPathComponent
         let uniqueURL = documents.appendingPathComponent(filename + "_" + UUID().uuidString)
         promise(.success(uniqueURL))
       }
     }.eraseToAnyPublisher()
+  }
+
+  private static func fileExtension(for mediaType: MediaType) -> String {
+    // Common media type to file extension mappings
+    switch mediaType {
+    case .epub: return ".epub"
+    case .pdf: return ".pdf"
+    case .cbz: return ".cbz"
+    case .divina: return ".divina"
+    case .lcpProtectedPDF: return ".lcpdf"
+    case .lcpProtectedAudiobook: return ".audiobook"
+    default: return ""
+    }
   }
 
   static func makeTemporaryURL() -> AnyPublisher<URL, Never> {

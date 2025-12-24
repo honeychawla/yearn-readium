@@ -7,8 +7,10 @@ extension Publication {
   /// Finds all the downloadable links for this publication.
   var downloadLinks: [Link] {
     links.filter {
-      return DocumentTypes.main.supportsMediaType($0.mediaType)
-        || DocumentTypes.main.supportsFileExtension($0.url().fileExtension)
+      let mediaTypeString = $0.mediaType?.string
+      let fileExtension = $0.url().pathExtension?.rawValue
+      return DocumentTypes.main.supportsMediaType(mediaTypeString)
+        || DocumentTypes.main.supportsFileExtension(fileExtension)
     }
   }
 
