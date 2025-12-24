@@ -69,31 +69,6 @@ class ReaderViewModel(
         }
     }
 
-    /**
-     * User-created decorations (highlights, annotations)
-     */
-    private val _userDecorations = MutableStateFlow<List<Decoration>>(emptyList())
-    val userDecorations: StateFlow<List<Decoration>> get() = _userDecorations
-
-    /**
-     * Apply decorations from JavaScript
-     */
-    fun applyDecorations(decorations: List<Decoration>) {
-        _userDecorations.value = decorations
-    }
-
-    fun addDecoration(decoration: Decoration) {
-        val current = _userDecorations.value.toMutableList()
-        current.add(decoration)
-        _userDecorations.value = current
-    }
-
-    fun removeDecoration(decorationId: String) {
-        _userDecorations.value = _userDecorations.value.filter {
-            it.id != decorationId
-        }
-    }
-
     private var lastSearchQuery: String? = null
 
     private var searchIterator: SearchIterator? = null
@@ -138,11 +113,6 @@ class ReaderViewModel(
         class Failure(val error: UserException) : Event()
         class LocatorUpdate(val locator: Locator) : Event()
         class TableOfContentsLoaded(val toc: List<Link>) : Event()
-        class TextSelected(
-            val selectedText: String,
-            val locator: Locator
-        ) : Event()
-        // TODO: Add DecorationTapped once we implement tap handling
     }
 
     sealed class FeedbackEvent {

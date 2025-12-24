@@ -16,17 +16,7 @@ interface AudiobookPlayerViewProps {
 
 const COMPONENT_NAME = 'AudiobookPlayerView';
 
-const LINKING_ERROR =
-  `The package 'react-native-readium' doesn't seem to be linked. Make sure: \n\n` +
-  '- You rebuilt the app after installing the package\n' +
-  '- You are not using Expo Go\n';
-
-const NativeAudiobookPlayerView =
-  UIManager.getViewManagerConfig(COMPONENT_NAME) != null
-    ? requireNativeComponent<AudiobookPlayerViewProps>(COMPONENT_NAME)
-    : () => {
-        throw new Error(LINKING_ERROR);
-      };
+const NativeAudiobookPlayerView = requireNativeComponent<AudiobookPlayerViewProps>(COMPONENT_NAME);
 
 export const AudiobookPlayerView: React.FC<AudiobookPlayerViewProps> = ({
   file,

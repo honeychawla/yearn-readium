@@ -41,28 +41,11 @@ class ReadiumViewManager(
           MapBuilder.of("bubbled", ON_TABLE_OF_CONTENTS)
         )
       )
-      .put(
-        ON_DECORATION_TAPPED,
-        MapBuilder.of(
-          "phasedRegistrationNames",
-          MapBuilder.of("bubbled", ON_DECORATION_TAPPED)
-        )
-      )
-      .put(
-        ON_TEXT_SELECTED,
-        MapBuilder.of(
-          "phasedRegistrationNames",
-          MapBuilder.of("bubbled", ON_TEXT_SELECTED)
-        )
-      )
       .build()
   }
 
   override fun getCommandsMap(): MutableMap<String, Int> {
-    return MapBuilder.of(
-      "create", COMMAND_CREATE,
-      "updateLocation", COMMAND_UPDATE_LOCATION
-    )
+    return MapBuilder.of("create", COMMAND_CREATE)
   }
 
   override fun receiveCommand(view: ReadiumView, commandId: String?, args: ReadableArray?) {
@@ -78,15 +61,6 @@ class ReadiumViewManager(
           buildForViewIfReady(view)
         }
       }
-      COMMAND_UPDATE_LOCATION -> {
-        val locationMap = args.getMap(1)
-        if (locationMap != null) {
-          val location = locationToLinkOrLocator(locationMap)
-          if (location != null) {
-            view.updateLocation(location)
-          }
-        }
-      }
       else -> {
       }
     }
@@ -97,16 +71,13 @@ class ReadiumViewManager(
     val path = (file.getString("url") ?: "")
       .replace("^(file:/+)?(/.*)$".toRegex(), "$2")
     val location = file.getMap("initialLocation")
-    val lcpPassphrase = file.getString("lcpPassphrase")
     var initialLocation: LinkOrLocator? = null
-
-    android.util.Log.d("ReadiumViewManager", "[LCP] setFile called - passphrase: ${if (lcpPassphrase != null) "PROVIDED" else "NULL"}")
 
     if (location != null) {
       initialLocation = locationToLinkOrLocator(location)
     }
 
-    view.file = File(path, initialLocation, lcpPassphrase)
+    view.file = File(path, initialLocation)
     this.buildForViewIfReady(view)
   }
 
@@ -149,11 +120,6 @@ class ReadiumViewManager(
     view.updatePreferencesFromJsonString(serialisedPreferences)
   }
 
-  @ReactProp(name = "decorations")
-  fun setDecorations(view: ReadiumView, decorationsJson: String?) {
-    view.applyDecorations(decorationsJson)
-  }
-
   @ReactPropGroup(names = ["width", "height"], customType = "Style")
   fun setStyle(view: ReadiumView?, index: Int, value: Int) {
     if (index == 0) {
@@ -166,11 +132,9 @@ class ReadiumViewManager(
 
   private fun buildForViewIfReady(view: ReadiumView) {
     var file = view.file
-    android.util.Log.d("ReadiumViewManager", "[LCP] buildForViewIfReady - file: ${file != null}, initialized: ${view.isViewInitialized}")
     if (file != null && view.isViewInitialized) {
-      android.util.Log.d("ReadiumViewManager", "[LCP] Calling openPublication with passphrase: ${if (file.lcpPassphrase != null) "PROVIDED" else "NULL"}")
       runBlocking {
-        svc.openPublication(file.path, file.initialLocation, file.lcpPassphrase) { fragment ->
+        svc.openPublication(file.path, file.initialLocation) { fragment ->
           view.addFragment(fragment)
         }
       }
@@ -180,9 +144,6 @@ class ReadiumViewManager(
   companion object {
     var ON_LOCATION_CHANGE = "onLocationChange"
     var ON_TABLE_OF_CONTENTS = "onTableOfContents"
-    var ON_DECORATION_TAPPED = "onDecorationTapped"
-    var ON_TEXT_SELECTED = "onTextSelected"
     var COMMAND_CREATE = 1
-    var COMMAND_UPDATE_LOCATION = 2
   }
 }
