@@ -63,6 +63,10 @@ class AudiobookPlayerView: UIView, Loggable {
 
     @objc var onLocationChange: RCTDirectEventBlock?
     @objc var onPlaybackStateChange: RCTDirectEventBlock?
+    @objc var onDownloadProgress: RCTDirectEventBlock?
+
+    private var activityIndicator: UIActivityIndicatorView?
+    private var progressView: UIProgressView?
 
     func loadAudiobookViaLicense(
         licensePath: String,
@@ -91,20 +95,88 @@ class AudiobookPlayerView: UIView, Loggable {
 
                 print("[AudiobookPlayerView] 📜 License JSON loaded")
 
+                // Check if publication is already downloaded
+                // Extract the publication ID from the license to check cache
+                if let links = licenseJSON["links"] as? [[String: Any]],
+                   let publicationLink = links.first(where: { ($0["rel"] as? String) == "publication" }),
+                   let publicationHref = publicationLink["href"] as? String {
+
+                    // Generate expected cache path based on license ID
+                    let licenseId = licenseJSON["id"] as? String ?? UUID().uuidString
+                    let cacheDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                        .appendingPathComponent("audiobook_cache")
+                    let cachedFile = cacheDir.appendingPathComponent("\(licenseId).lcpau")
+
+                    if FileManager.default.fileExists(atPath: cachedFile.path) {
+                        print("[AudiobookPlayerView] ✅ Found cached audiobook at: \(cachedFile.path)")
+                        // Load from cache instead of re-downloading
+                        readerService.buildViewController(
+                            url: cachedFile.path,
+                            bookId: licenseId,
+                            location: location,
+                            lcpPassphrase: lcpPassphrase,
+                            sender: await UIApplication.shared.delegate?.window??.rootViewController,
+                            completion: { vc in
+                                Task { @MainActor in
+                                    if let audiobookVC = vc as? AudiobookViewController {
+                                        print("[AudiobookPlayerView] ✅ Got AudiobookViewController from cache")
+                                        self.addViewControllerAsSubview(audiobookVC)
+                                    }
+                                }
+                            }
+                        )
+                        return
+                    } else {
+                        print("[AudiobookPlayerView] DID NOT FIND cached audiobook at: \(cachedFile.path)")
+                    }
+                }
+
+                print("[AudiobookPlayerView] 📥 Audiobook not cached, downloading...")
+
                 // Acquire publication from license
-                // Note: acquirePublication() doesn't take authentication parameter
-                // It will use the authentication already configured in LCPService
                 let result = await lcpService.acquirePublication(
                     from: .data(licenseData),
                     onProgress: { progress in
-                        print("[AudiobookPlayerView] 📥 Acquisition progress:", progress)
+                        Task { @MainActor in
+                            switch progress {
+                            case .indefinite:
+                                self.showActivityIndicator()
+                                self.onDownloadProgress?(["indefinite": true])
+                            case .percent(let percent):
+                                self.showProgressBar(percent: Double(percent))
+                                self.onDownloadProgress?(["percent": Double(percent)])
+                            }
+                        }
                     }
                 )
 
                 switch result {
                 case .success(let acquired):
+                    await MainActor.run {
+                        self.hideProgressIndicators()
+                    }
                     print("[AudiobookPlayerView] ✅ Publication acquired via license")
                     print("[AudiobookPlayerView] 📁 Local URL:", acquired.localURL)
+
+                    // Cache the downloaded file for future offline use
+                    do {
+                        let licenseId = licenseJSON["id"] as? String ?? UUID().uuidString
+                        let cacheDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                            .appendingPathComponent("audiobook_cache")
+
+                        // Create cache directory if it doesn't exist
+                        try FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+
+                        let cachedFile = cacheDir.appendingPathComponent("\(licenseId).lcpau")
+
+                        // Copy downloaded file to cache if not already there
+                        if !FileManager.default.fileExists(atPath: cachedFile.path) {
+                            try FileManager.default.copyItem(at: acquired.localURL.url, to: cachedFile)
+                            print("[AudiobookPlayerView] 💾 Cached audiobook to: \(cachedFile.path)")
+                        }
+                    } catch {
+                        print("[AudiobookPlayerView] ⚠️ WARNING: Failed to cache audiobook:", error)
+                    }
 
                     // Now open the downloaded publication
                     readerService.buildViewController(
@@ -222,5 +294,57 @@ class AudiobookPlayerView: UIView, Loggable {
         rootView.rightAnchor.constraint(equalTo: self.rightAnchor).isActive = true
 
         print("[AudiobookPlayerView] ✅ Subview added successfully")
+    }
+
+    private func showActivityIndicator() {
+        if activityIndicator == nil {
+            let indicator = UIActivityIndicatorView(style: .large)
+            indicator.translatesAutoresizingMaskIntoConstraints = false
+            indicator.color = .gray
+            addSubview(indicator)
+
+            NSLayoutConstraint.activate([
+                indicator.centerXAnchor.constraint(equalTo: centerXAnchor),
+                indicator.centerYAnchor.constraint(equalTo: centerYAnchor)
+            ])
+
+            activityIndicator = indicator
+        }
+        activityIndicator?.startAnimating()
+    }
+
+    private func showProgressBar(percent: Double) {
+        hideActivityIndicator()
+
+        if progressView == nil {
+            let progress = UIProgressView(progressViewStyle: .default)
+            progress.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(progress)
+
+            NSLayoutConstraint.activate([
+                progress.centerXAnchor.constraint(equalTo: centerXAnchor),
+                progress.centerYAnchor.constraint(equalTo: centerYAnchor),
+                progress.widthAnchor.constraint(equalTo: widthAnchor, multiplier: 0.8)
+            ])
+
+            progressView = progress
+        }
+        progressView?.setProgress(Float(percent), animated: true)
+    }
+
+    private func hideActivityIndicator() {
+        activityIndicator?.stopAnimating()
+        activityIndicator?.removeFromSuperview()
+        activityIndicator = nil
+    }
+
+    private func hideProgressBar() {
+        progressView?.removeFromSuperview()
+        progressView = nil
+    }
+
+    private func hideProgressIndicators() {
+        hideActivityIndicator()
+        hideProgressBar()
     }
 }
