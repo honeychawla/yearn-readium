@@ -2,7 +2,6 @@ package com.reactnativereadium.utils.extensions
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.readium.r2.shared.extensions.tryOrNull
 import java.io.File
 import java.io.InputStream
 import java.util.*
@@ -16,8 +15,12 @@ suspend fun InputStream.toFile(path: String) {
     }
 }
 
-suspend fun InputStream.copyToTempFile(dir: String): File? = tryOrNull {
-    val filename = UUID.randomUUID().toString()
-    File(dir + filename)
-        .also { toFile(it.path) }
+suspend fun InputStream.copyToTempFile(dir: String): File? {
+    return try {
+        val filename = UUID.randomUUID().toString()
+        File(dir + filename)
+            .also { toFile(it.path) }
+    } catch (e: Exception) {
+        null
+    }
 }

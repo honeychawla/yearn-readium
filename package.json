@@ -36,7 +36,9 @@
     "postversion": "npm run publish:git && npm run publish:npm",
     "publish:git": "git push && git push --tags",
     "publish:npm": "npm run prepare && npm publish --access public",
-    "changelog": "conventional-changelog -p angular -i CHANGELOG.md -s -r 0"
+    "changelog": "conventional-changelog -p angular -i CHANGELOG.md -s -r 0",
+    "android": "expo run:android",
+    "ios": "expo run:ios"
   },
   "keywords": [
     "react-native",
@@ -155,7 +157,10 @@
   },
   "dependencies": {
     "@d-i-t-a/reader": "^2.1.4",
-    "use-deep-compare": "^1.1.0"
+    "use-deep-compare": "^1.1.0",
+    "expo": "~52.0.48",
+    "react": "18.3.1",
+    "react-native": "0.77.3"
   },
   "engines": {
     "node": ">=18"

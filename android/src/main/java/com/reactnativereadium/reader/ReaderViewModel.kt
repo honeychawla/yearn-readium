@@ -11,7 +11,6 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import org.readium.r2.navigator.Decoration
-import org.readium.r2.navigator.ExperimentalDecorator
 import org.readium.r2.shared.publication.Locator
 import org.readium.r2.shared.publication.LocatorCollection
 import org.readium.r2.shared.publication.Publication
@@ -19,11 +18,10 @@ import org.readium.r2.shared.publication.services.search.search
 import org.readium.r2.shared.publication.services.search.SearchIterator
 import org.readium.r2.shared.publication.services.search.SearchTry
 import org.readium.r2.shared.Search
-import org.readium.r2.shared.UserException
 import org.readium.r2.shared.publication.Link
 import org.readium.r2.shared.util.Try
 
-@OptIn(Search::class, ExperimentalDecorator::class)
+@OptIn(Search::class)
 class ReaderViewModel(
   val publication: Publication,
   val initialLocation: Locator?
@@ -34,9 +32,13 @@ class ReaderViewModel(
         if (query == lastSearchQuery) return@launch
         lastSearchQuery = query
         _searchLocators.value = emptyList()
-        searchIterator = publication.search(query)
-            .onFailure { channel.send(Event.Failure(it)) }
-            .getOrNull()
+        // In Readium 3.x, search returns SearchIterator directly
+        searchIterator = try {
+            publication.search(query)
+        } catch (e: Exception) {
+            channel.send(Event.Failure(e))
+            null
+        }
         pagingSourceFactory.invalidate()
         channel.send(Event.StartNewSearch)
     }
@@ -110,7 +112,7 @@ class ReaderViewModel(
         object OpenOutlineRequested : Event()
         object OpenDrmManagementRequested : Event()
         object StartNewSearch : Event()
-        class Failure(val error: UserException) : Event()
+        class Failure(val error: Any) : Event()
         class LocatorUpdate(val locator: Locator) : Event()
         class TableOfContentsLoaded(val toc: List<Link>) : Event()
     }

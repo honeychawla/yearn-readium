@@ -4,45 +4,51 @@ import android.annotation.SuppressLint
 import androidx.lifecycle.ViewModelStore
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.util.RNLog
+import com.reactnativereadium.lcp.LCPPassphraseAuthentication
 import com.reactnativereadium.utils.LinkOrLocator
 import java.io.File
-import java.io.IOException
-import java.net.ServerSocket
-import org.readium.r2.shared.extensions.mediaType
-import org.readium.r2.shared.extensions.tryOrNull
 import org.readium.r2.shared.publication.Locator
-import org.readium.r2.shared.publication.asset.FileAsset
 import org.readium.r2.shared.publication.Publication
-import org.readium.r2.streamer.server.Server
-import org.readium.r2.streamer.Streamer
+import org.readium.r2.shared.util.asset.AssetRetriever
+import org.readium.r2.shared.util.http.DefaultHttpClient
+import org.readium.r2.streamer.parser.DefaultPublicationParser
+import org.readium.r2.streamer.PublicationOpener
+import org.readium.r2.lcp.LcpService
 
 
 class ReaderService(
   private val reactContext: ReactApplicationContext
 ) {
-  private var streamer = Streamer(reactContext)
-  // see R2App.onCreate
-  private var server: Server
-  // val channel = EventChannel(Channel<Event>(Channel.BUFFERED), viewModelScope)
+  private val httpClient = DefaultHttpClient()
+  private val assetRetriever = AssetRetriever(reactContext.contentResolver, httpClient)
+  private val publicationParser = DefaultPublicationParser(reactContext, httpClient, assetRetriever, null)
+
+  // LCP service for content protection - initialize if needed
+  private val lcpService: LcpService? = null // Will be initialized when LCP is needed
+
+  // Content protections should be added when opening specific publications
+  // For now, create opener without LCP (will be added per-publication as needed)
+  private val publicationOpener = PublicationOpener(
+    publicationParser = publicationParser,
+    contentProtections = emptyList()
+  )
+
   private var store = ViewModelStore()
 
   companion object {
-    @SuppressLint("StaticFieldLeak")
-    lateinit var server: Server
-      private set
-
     lateinit var R2DIRECTORY: String
       private set
 
+    // Server is removed in Readium 3.x - publications are served directly by navigators
+    @Deprecated("Server is no longer used in Readium 3.x")
     var isServerStarted = false
       private set
   }
 
   init {
-    val s = ServerSocket(0)
-    s.close()
-    server = Server(s.localPort, reactContext)
-    this.startServer()
+    // Server initialization removed - no longer needed in Readium 3.x
+    // Publications are now served directly by navigators without a central server
+    isServerStarted = true // Set to true for backward compatibility
   }
 
   fun locatorFromLinkOrLocator(
@@ -70,41 +76,41 @@ class ReaderService(
     callback: suspend (fragment: BaseReaderFragment) -> Unit
   ) {
     val file = File(fileName)
-    val asset = FileAsset(file, file.mediaType())
 
-    streamer.open(
+    // Retrieve asset using AssetRetriever (Readium 3.x)
+    val assetResult = assetRetriever.retrieve(file)
+    val asset = when {
+      assetResult.isSuccess -> assetResult.getOrNull()
+      else -> {
+        RNLog.w(reactContext, "Error retrieving asset: ${assetResult.failureOrNull()}")
+        try { file.delete() } catch (e: Exception) { }
+        return
+      }
+    } ?: return
+
+    val result = publicationOpener.open(
       asset,
-      allowUserInteraction = false,
-      sender = reactContext
+      allowUserInteraction = false
     )
-      .onSuccess {
-          val locator = locatorFromLinkOrLocator(initialLocation, it)
-          val readerFragment = EpubReaderFragment.newInstance()
-          readerFragment.initFactory(it, locator)
-          callback.invoke(readerFragment)
 
+    if (result.isSuccess) {
+      val publication = result.getOrNull()
+      if (publication != null) {
+        val locator = locatorFromLinkOrLocator(initialLocation, publication)
+        val readerFragment = EpubReaderFragment.newInstance()
+        readerFragment.initFactory(publication, locator)
+        callback.invoke(readerFragment)
+      } else {
+        RNLog.w(reactContext, "Error: Publication is null")
       }
-      .onFailure {
-        tryOrNull { asset.file.delete() }
-        RNLog.w(reactContext, "Error executing ReaderService.openPublication")
-        // TODO: implement failure event
-      }
-  }
-
-  private fun startServer() {
-    if (!server.isAlive) {
+    } else {
+      val exception = result.failureOrNull()
+      RNLog.w(reactContext, "Error executing ReaderService.openPublication: $exception")
+      // Attempt to clean up the file
       try {
-        server.start()
-      } catch (e: IOException) {
-        RNLog.e(reactContext, "Unable to start the Readium server.")
-      }
-      if (server.isAlive) {
-        // // Add your own resources here
-        // server.loadCustomResource(assets.open("scripts/test.js"), "test.js")
-        // server.loadCustomResource(assets.open("styles/test.css"), "test.css")
-        // server.loadCustomFont(assets.open("fonts/test.otf"), applicationContext, "test.otf")
-
-        isServerStarted = true
+        file.delete()
+      } catch (e: Exception) {
+        // Ignore deletion errors
       }
     }
   }

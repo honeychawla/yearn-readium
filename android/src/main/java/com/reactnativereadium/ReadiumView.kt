@@ -1,3 +1,5 @@
+@file:OptIn(org.readium.r2.shared.InternalReadiumApi::class)
+
 package com.reactnativereadium
 
 import android.view.Choreographer

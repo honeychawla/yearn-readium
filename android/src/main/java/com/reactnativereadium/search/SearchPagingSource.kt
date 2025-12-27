@@ -31,7 +31,13 @@ class SearchPagingSource(
         listener ?: return LoadResult.Page(data = emptyList(), prevKey = null, nextKey = null)
 
         return try {
-            val page = listener.next().getOrThrow()
+            val result = listener.next()
+            val page = when {
+                result.isSuccess -> result.getOrNull()
+                else -> {
+                    return LoadResult.Error(Exception("Search failed: ${result.failureOrNull()}"))
+                }
+            }
             LoadResult.Page(
                 data = page?.locators ?: emptyList(),
                 prevKey = null,

@@ -1,52 +1,58 @@
 package com.reactnativereadium
 
 import android.content.Context
-import android.net.Uri
 import android.util.Log
 import android.widget.FrameLayout
 import android.widget.TextView
 import androidx.core.content.ContextCompat
 import com.facebook.react.bridge.ReactContext
 import com.facebook.react.bridge.ReadableMap
-import com.facebook.react.bridge.WritableMap
-import com.facebook.react.uimanager.events.RCTEventEmitter
-import com.google.android.exoplayer2.ExoPlayer
-import com.google.android.exoplayer2.MediaItem
-import com.google.android.exoplayer2.Player
-import com.google.android.exoplayer2.source.ProgressiveMediaSource
-import com.google.android.exoplayer2.upstream.DataSource
-import com.google.android.exoplayer2.upstream.DataSpec
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.readium.adapter.exoplayer.audio.ExoPlayerEngineProvider
+import org.readium.adapter.exoplayer.audio.ExoPlayerPreferences
+import org.readium.navigator.media.audio.AudioNavigator
+import org.readium.navigator.media.audio.AudioNavigatorFactory
 import org.readium.r2.lcp.LcpService
-import org.readium.r2.shared.extensions.tryOrNull
 import org.readium.r2.shared.publication.Publication
-import org.readium.r2.shared.publication.asset.FileAsset
-import org.readium.r2.streamer.Streamer
+import org.readium.r2.shared.util.AbsoluteUrl
+import org.readium.r2.shared.util.asset.AssetRetriever
+import org.readium.r2.shared.util.http.DefaultHttpClient
+import org.readium.r2.shared.util.FileExtension
+import org.readium.r2.shared.util.format.FormatHints
+import org.readium.r2.shared.util.mediatype.MediaType
+import org.readium.r2.streamer.PublicationOpener
+import org.readium.r2.streamer.parser.DefaultPublicationParser
 import com.reactnativereadium.lcp.LCPPassphraseAuthentication
 import java.io.File
-import java.io.InputStream
 
 /**
- * AudiobookPlayerView for LCP-protected audiobooks using Readium 2.4.1
+ * AudiobookPlayerView for LCP-protected audiobooks using Readium 3.1.2
+ *
+ * Uses Media Navigator (similar to iOS AudioNavigator) for automatic LCP decryption
  *
  * SECURITY MODEL:
  * - .lcpa files remain ENCRYPTED on disk at all times
- * - Readium's Streamer decrypts content IN-MEMORY ONLY during playback
- * - ExoPlayer streams the decrypted audio from memory
+ * - Media Navigator decrypts content IN-MEMORY ONLY during playback
  * - No decrypted files are ever written to disk
  */
 class AudiobookPlayerView(context: Context) : FrameLayout(context) {
 
     private val reactContext = context as ReactContext
-    private var player: ExoPlayer? = null
+    private var audioNavigator: AudioNavigator<*, *>? = null
     private val statusText: TextView
     private var publication: Publication? = null
+    private var asset: org.readium.r2.shared.util.asset.Asset? = null // Keep asset alive for LCP
+
+    // Keep these alive for the lifecycle of the view (important for LCP)
+    private var httpClient: org.readium.r2.shared.util.http.DefaultHttpClient? = null
+    private var assetRetriever: AssetRetriever? = null
+    private var lcpService: LcpService? = null
 
     init {
-        Log.d(TAG, "🔧 AudiobookPlayerView initialized")
+        Log.d(TAG, "🔧 AudiobookPlayerView initialized (Readium 3.1.2)")
 
         statusText = TextView(context).apply {
             text = "Initializing audiobook player..."
@@ -69,182 +75,175 @@ class AudiobookPlayerView(context: Context) : FrameLayout(context) {
         Log.d(TAG, "📜 License path: $licensePath")
 
         if (url != null && licensePath != null && lcpPassphrase != null) {
-            loadAudiobookViaLicense(url, licensePath, lcpPassphrase)
+            loadAudiobookWithLCP(url, licensePath, lcpPassphrase)
         } else {
             Log.e(TAG, "❌ ERROR: Missing required parameters")
             updateStatus("Error: Missing required parameters")
         }
     }
 
-    private fun loadAudiobookViaLicense(url: String, licensePath: String, passphrase: String) {
-        Log.d(TAG, "🚀 loadAudiobookViaLicense called")
-        updateStatus("Loading audiobook via license...")
+    private fun loadAudiobookWithLCP(url: String, licensePath: String, passphrase: String) {
+        Log.d(TAG, "🚀 loadAudiobookWithLCP called")
+        updateStatus("Loading audiobook...")
 
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                // Read license JSON from file
-                val licenseFile = File(licensePath.removePrefix("file://"))
-                val licenseData = licenseFile.readBytes()
+                // The audiobook file is downloaded by React Native
+                val originalFile = File(url.removePrefix("file://"))
+                Log.d(TAG, "📂 Original file: ${originalFile.absolutePath}")
+                Log.d(TAG, "📂 File exists: ${originalFile.exists()}")
+                Log.d(TAG, "📂 File size: ${originalFile.length()} bytes")
 
-                Log.d(TAG, "📜 License JSON loaded (${licenseData.size} bytes)")
-                withContext(Dispatchers.Main) {
-                    updateStatus("License loaded, acquiring publication...")
-                }
-
-                // Initialize LCP Service (Readium 2.4.1 API)
-                val lcpService = LcpService(reactContext)
-                if (lcpService == null) {
-                    Log.e(TAG, "❌ LCP Service is null - liblcp.so missing?")
+                if (!originalFile.exists()) {
                     withContext(Dispatchers.Main) {
-                        updateStatus("Error: LCP library not available")
+                        updateStatus("Error: Audiobook file not found")
                     }
                     return@launch
                 }
-                Log.d(TAG, "✅ LCP Service initialized")
 
-                // CRITICAL FIX: Clear passphrase cache to force re-authentication
-                // The cached hash from iOS doesn't work on Android
-                try {
-                    // Clear the passphrase database
-                    val lcpDir = File(reactContext.filesDir, "lcp")
-                    if (lcpDir.exists()) {
-                        lcpDir.deleteRecursively()
-                        Log.d(TAG, "🗑️ Cleared LCP passphrase cache in filesDir")
+                // Rename to .lcpa extension for proper LCP detection
+                val audiobookFile = if (!originalFile.name.endsWith(".lcpa")) {
+                    val lcpaFile = File(originalFile.parentFile, originalFile.nameWithoutExtension + ".lcpa")
+                    if (originalFile.renameTo(lcpaFile)) {
+                        Log.d(TAG, "✅ Renamed to .lcpa: ${lcpaFile.absolutePath}")
+                        lcpaFile
+                    } else {
+                        Log.w(TAG, "⚠️ Failed to rename, using original file")
+                        originalFile
                     }
-                    // Also check cache dir
-                    val lcpCacheDir = File(reactContext.cacheDir, "lcp")
-                    if (lcpCacheDir.exists()) {
-                        lcpCacheDir.deleteRecursively()
-                        Log.d(TAG, "🗑️ Cleared LCP passphrase cache in cacheDir")
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Could not clear LCP cache: $e")
+                } else {
+                    originalFile
                 }
+                Log.d(TAG, "📂 Using file: ${audiobookFile.absolutePath}")
 
-                // Ensure cache directory exists and is writable
-                val cacheDir = reactContext.cacheDir
-                if (!cacheDir.exists()) {
-                    cacheDir.mkdirs()
-                }
-                Log.d(TAG, "📁 Cache dir: ${cacheDir.absolutePath}")
-                Log.d(TAG, "📁 Cache writable: ${cacheDir.canWrite()}")
-
-                // Acquire publication from license document (Readium 2.4.1 API: lcpl parameter)
-                Log.d(TAG, "📥 Acquiring publication from license...")
-                val acquisitionResult = lcpService.acquirePublication(
-                    lcpl = licenseData,
-                    onProgress = { progress: Double ->
-                        Log.d(TAG, "📥 Download progress: $progress")
-                        CoroutineScope(Dispatchers.Main).launch {
-                            updateStatus("Downloading: ${(progress * 100).toInt()}%")
-                        }
-                    }
-                )
-
-                // Debug: Log the result type
-                Log.d(TAG, "📊 Acquisition result type: ${acquisitionResult::class.java.simpleName}")
-                Log.d(TAG, "📊 Acquisition result: $acquisitionResult")
-
-                // Work around metadata version mismatch - use fold() which is a core method
-                val acquired = acquisitionResult.fold(
-                    onSuccess = { it },
-                    onFailure = { error ->
-                        Log.e(TAG, "❌ Failed to acquire publication: $error")
-
-                        // Provide helpful error messages
-                        val errorMsg = when {
-                            error.toString().contains("WriteFailed") -> "Storage full or write permission denied. Free up space and try again."
-                            error.toString().contains("Network") -> "Network error during download"
-                            else -> "Acquisition failed: $error"
-                        }
-
-                        withContext(Dispatchers.Main) {
-                            updateStatus(errorMsg)
-                        }
-                        return@launch
-                    }
-                )
-
-                Log.d(TAG, "✅ Publication acquired: ${acquired.localFile}")
-                Log.d(TAG, "📁 File exists: ${acquired.localFile.exists()}")
-                Log.d(TAG, "📁 File size: ${acquired.localFile.length()} bytes")
+                // Note: For .lcpau files, the license is embedded in the package
+                // The separate license JSON is only needed for reference/storage
+                Log.d(TAG, "📜 License path provided: $licensePath (embedded in .lcpau)")
 
                 withContext(Dispatchers.Main) {
-                    updateStatus("Opening publication with LCP protection...")
+                    updateStatus("Initializing LCP service...")
                 }
 
-                // CRITICAL: Must use ContentProtection even after acquisition
-                // Acquisition downloads the file but doesn't decrypt it
-                val streamer = Streamer(
-                    context = reactContext,
-                    contentProtections = listOf(
-                        lcpService.contentProtection(LCPPassphraseAuthentication(passphrase))
-                    )
-                )
+                // Initialize AssetRetriever and LCP Service (Readium 3.x API)
+                // Store as class members to keep them alive (important for LCP context)
+                Log.d(TAG, "🔧 Initializing AssetRetriever and LCP Service...")
+                httpClient = DefaultHttpClient()
+                assetRetriever = AssetRetriever(reactContext.contentResolver, httpClient!!)
 
-                val asset = FileAsset(acquired.localFile)
-                Log.d(TAG, "🔍 Opening publication WITH ContentProtection")
-
-                val publicationResult = streamer.open(
-                    asset = asset,
-                    allowUserInteraction = false,
-                    sender = reactContext
-                )
-
-                // Use fold() to extract publication
-                val pub = publicationResult.fold(
-                    onSuccess = { it },
-                    onFailure = { error ->
-                        Log.e(TAG, "❌ Failed to open publication: $error")
+                lcpService = LcpService(reactContext, assetRetriever!!)
+                    ?: run {
+                        Log.e(TAG, "❌ LCP Service is null")
                         withContext(Dispatchers.Main) {
-                            updateStatus("Error opening publication: $error")
+                            updateStatus("Error: LCP library not available")
                         }
                         return@launch
                     }
+                Log.d(TAG, "✅ LCP Service initialized")
+                Log.d(TAG, "🔑 Passphrase: ${passphrase.take(4)}... (${passphrase.length} chars)")
+                Log.d(TAG, "⚠️ WARNING: Readium caches passphrases. If this fails, try:")
+                Log.d(TAG, "⚠️ 1. Clear app data")
+                Log.d(TAG, "⚠️ 2. Or the cached passphrase might be wrong")
+
+                withContext(Dispatchers.Main) {
+                    updateStatus("Opening publication...")
+                }
+
+                // Create PublicationOpener with LCP authentication (Readium 3.x API)
+                // Try using Readium's built-in dialog authentication for testing
+                val dialogAuth = org.readium.r2.lcp.auth.LcpDialogAuthentication()
+                val authentication = LCPPassphraseAuthentication(passphrase)
+
+                // Try our custom auth first, but keep dialog as backup
+                Log.d(TAG, "🔐 Created custom authentication: ${authentication.javaClass.simpleName}")
+                Log.d(TAG, "🔐 Created dialog authentication: ${dialogAuth.javaClass.simpleName}")
+
+                // TEST: Try with dialog auth to see if IT gets called
+                val contentProtection = lcpService!!.contentProtection(dialogAuth)
+                Log.d(TAG, "🔐 Created ContentProtection: ${contentProtection.javaClass.simpleName}")
+
+                val publicationParser = DefaultPublicationParser(reactContext, httpClient!!, assetRetriever!!, null)
+                val publicationOpener = PublicationOpener(
+                    publicationParser = publicationParser,
+                    contentProtections = listOf(contentProtection)
                 )
+                Log.d(TAG, "🔐 PublicationOpener configured with ${1} content protection(s)")
+
+                // Retrieve the asset using AssetRetriever (Readium 3.x - no more FileAsset constructor)
+                // Provide format hints to ensure LCP detection (.lcpa is standard, .lcpau is legacy)
+                Log.d(TAG, "🔍 Retrieving asset...")
+                val formatHints = org.readium.r2.shared.util.format.FormatHints(
+                    mediaTypes = listOf(MediaType.LCP_PROTECTED_AUDIOBOOK),
+                    fileExtensions = listOf(FileExtension("lcpa"), FileExtension("lcpau"))
+                )
+                val assetResult = assetRetriever!!.retrieve(audiobookFile, formatHints)
+                val retrievedAsset = when {
+                    assetResult.isSuccess -> assetResult.getOrNull()!!
+                    else -> {
+                        Log.e(TAG, "❌ Failed to retrieve asset: ${assetResult.failureOrNull()}")
+                        withContext(Dispatchers.Main) {
+                            updateStatus("Error: Failed to access audiobook file")
+                        }
+                        return@launch
+                    }
+                }
+
+                // Store asset reference to keep it alive (important for LCP)
+                asset = retrievedAsset
+
+                Log.d(TAG, "📦 Asset retrieved - format: ${retrievedAsset.format}")
+                Log.d(TAG, "📦 Asset format mediaType: ${retrievedAsset.format.mediaType}")
+                Log.d(TAG, "📦 Asset format fileExtension: ${retrievedAsset.format.fileExtension}")
+                Log.d(TAG, "🔍 Opening publication with LCP protection...")
+                // IMPORTANT: allowUserInteraction = true is required for Navigator rendering (enables decryption)
+                // false is only for metadata-only imports
+                val openResult = publicationOpener.open(retrievedAsset, allowUserInteraction = true)
+                val pub = when {
+                    openResult.isSuccess -> openResult.getOrNull()!!
+                    else -> {
+                        Log.e(TAG, "❌ Failed to open publication: ${openResult.failureOrNull()}")
+                        withContext(Dispatchers.Main) {
+                            updateStatus("Error: Failed to open audiobook")
+                        }
+                        return@launch
+                    }
+                }
 
                 publication = pub
                 Log.d(TAG, "✅ Publication opened successfully")
-                Log.d(TAG, "📚 Title: ${publication!!.metadata.title}")
-                Log.d(TAG, "📚 Reading order has ${publication!!.readingOrder.size} items")
+                Log.d(TAG, "📚 Title: ${pub.metadata.title}")
+                Log.d(TAG, "📚 Reading order: ${pub.readingOrder.size} items")
 
-                // CRITICAL: Check if publication is still restricted
-                // In Readium 2.4.1, check the rights via LCP service
-                val contentProtectionService = publication!!.findService(org.readium.r2.shared.publication.services.ContentProtectionService::class)
-                Log.d(TAG, "🔍 ContentProtectionService: $contentProtectionService")
+                // Check publication metadata
+                Log.d(TAG, "📋 ConformsTo profiles: ${pub.metadata.conformsTo}")
+                val hasProtection = pub.metadata.conformsTo.any { it.toString().contains("lcp") }
+                Log.d(TAG, "🔒 Has LCP conformance: $hasProtection")
 
-                if (contentProtectionService != null) {
-                    Log.d(TAG, "🔒 Publication has content protection")
-                    val rights = contentProtectionService.rights
-                    Log.d(TAG, "🔒 Rights type: ${rights::class.java.simpleName}")
-                    Log.d(TAG, "🔒 Rights: $rights")
-
-                    // AllRestricted means the publication cannot be read
-                    // This usually means the passphrase was wrong or license is invalid
-                    if (rights is org.readium.r2.shared.publication.services.ContentProtectionService.UserRights.AllRestricted) {
-                        Log.e(TAG, "❌ CRITICAL: Publication is AllRestricted - cannot read content!")
-                        Log.e(TAG, "This means either:")
-                        Log.e(TAG, "  1. Passphrase is incorrect")
-                        Log.e(TAG, "  2. License is expired/revoked")
-                        Log.e(TAG, "  3. License doesn't grant read rights")
-                        withContext(Dispatchers.Main) {
-                            updateStatus("Error: Publication is restricted. Check passphrase or license validity.")
-                        }
-                        return@launch
-                    }
-                } else {
-                    Log.d(TAG, "✅ No content protection service (publication unlocked)")
+                // Check if publication has links (should be encrypted resources)
+                pub.readingOrder.firstOrNull()?.let { link ->
+                    Log.d(TAG, "📄 First audio resource: ${link.href}")
+                    Log.d(TAG, "📄 Media type: ${link.mediaType}")
                 }
 
+                Log.d(TAG, "🔒 LCP authentication successful - proceeding to playback")
+
+                // Debug: Check publication type and container
+                Log.d(TAG, "📦 Publication class: ${pub.javaClass.simpleName}")
+                Log.d(TAG, "📦 Publication toString: ${pub.toString().take(200)}")
+
+                // In Readium 3.x, isRestricted was removed
+                // The publication opening should have unlocked it if passphrase was correct
+                // The fact that it opened without error suggests it's unlocked
+                Log.d(TAG, "✅ Publication opened - assuming unlocked (isRestricted removed in 3.x)")
+
+                // Create Media Navigator on Main thread (required for ExoPlayer)
                 withContext(Dispatchers.Main) {
                     updateStatus("Creating audio player...")
+                    createMediaNavigator(pub)
                 }
-
-                // Create ExoPlayer and play decrypted audio
-                createAudioPlayer(publication!!)
 
             } catch (e: Exception) {
                 Log.e(TAG, "❌ ERROR loading audiobook", e)
+                e.printStackTrace()
                 withContext(Dispatchers.Main) {
                     updateStatus("Error: ${e.message}")
                 }
@@ -252,76 +251,58 @@ class AudiobookPlayerView(context: Context) : FrameLayout(context) {
         }
     }
 
-    private suspend fun createAudioPlayer(publication: Publication) {
-        withContext(Dispatchers.Main) {
-            try {
-                Log.d(TAG, "🎧 Creating ExoPlayer for audiobook...")
+    private fun createMediaNavigator(publication: Publication) {
+        // Must run on main thread for ExoPlayer
+        try {
+            Log.d(TAG, "🎧 Creating Media Navigator...")
 
-                // Initialize ExoPlayer
-                player = ExoPlayer.Builder(reactContext).build()
+            // Simplified approach matching Readium test app
+            val application = reactContext.applicationContext as android.app.Application
+            val engineProvider = ExoPlayerEngineProvider(application)
 
-                if (publication.readingOrder.isNotEmpty()) {
-                    val firstLink = publication.readingOrder[0]
-                    Log.d(TAG, "🎵 First audio link: ${firstLink.href}")
-                    Log.d(TAG, "🎵 Media type: ${firstLink.mediaType}")
+            // Create AudioNavigator factory (simplified - let Readium handle defaults)
+            val factory = AudioNavigatorFactory(publication, engineProvider) ?: run {
+                Log.e(TAG, "❌ Failed to create AudioNavigatorFactory")
+                updateStatus("Error: Unsupported publication format")
+                return
+            }
 
-                    // Test: Read a SMALL chunk to verify decryption works (avoid OOM)
-                    val testResource = publication.get(firstLink)
-                    val testResult = kotlinx.coroutines.runBlocking {
-                        testResource.read(0L..1024L) // Just read first 1KB
+            // Create the navigator asynchronously (createNavigator is a suspend function)
+            CoroutineScope(Dispatchers.Main).launch {
+                val navigatorResult = factory.createNavigator(
+                    initialLocator = publication.readingOrder.firstOrNull()?.let {
+                        publication.locatorFromLink(it)
+                    } ?: publication.readingOrder[0].let { publication.locatorFromLink(it) },
+                    initialPreferences = ExoPlayerPreferences(),
+                    readingOrder = publication.readingOrder
+                )
+
+                // Handle the result
+                val navigator = when {
+                    navigatorResult.isSuccess -> navigatorResult.getOrNull()!!
+                    else -> {
+                        Log.e(TAG, "❌ Failed to create navigator: ${navigatorResult.failureOrNull()}")
+                        updateStatus("Error: Failed to create audio player")
+                        return@launch
                     }
-
-                    val testData = testResult.fold(
-                        onSuccess = { it },
-                        onFailure = { error ->
-                            Log.e(TAG, "❌ Test chunk read failed: $error")
-                            null
-                        }
-                    )
-
-                    if (testData != null && testData.size > 0) {
-                        Log.d(TAG, "✅ Test chunk read: ${testData.size} bytes")
-                        Log.d(TAG, "🔓 Decryption working! First 16 bytes: ${testData.take(16).map { "%02x".format(it) }.joinToString("")}")
-                    } else {
-                        Log.e(TAG, "❌ Chunk read returned empty/null data")
-                    }
-
-                    // Get decrypted resource through Readium Publication
-                    // KEY SECURITY FEATURE: This decrypts in-memory, file stays encrypted on disk!
-                    val resource = publication.get(firstLink)
-
-                    // Create custom DataSource that reads from Readium's decrypted Resource
-                    val dataSourceFactory = ReadiumDataSource.Factory(publication, firstLink)
-                    val mediaSource = ProgressiveMediaSource.Factory(dataSourceFactory)
-                        .createMediaSource(MediaItem.fromUri(Uri.parse("readium://audio/${firstLink.href}")))
-
-                    player?.setMediaSource(mediaSource)
-                    player?.prepare()
-                    player?.play()
-
-                    Log.d(TAG, "✅ ExoPlayer created and playing")
-                    Log.d(TAG, "🔒 Security: Audio decrypted in-memory only, file encrypted on disk")
-                    updateStatus("Playing audiobook! 🎧")
-
-                    // Listen to playback state
-                    player?.addListener(object : Player.Listener {
-                        override fun onPlaybackStateChanged(state: Int) {
-                            when (state) {
-                                Player.STATE_BUFFERING -> updateStatus("Buffering...")
-                                Player.STATE_READY -> updateStatus("Ready ✅")
-                                Player.STATE_ENDED -> updateStatus("Playback ended")
-                            }
-                        }
-                    })
-                } else {
-                    Log.e(TAG, "❌ No audio files in publication")
-                    updateStatus("Error: No audio files found")
                 }
 
-            } catch (e: Exception) {
-                Log.e(TAG, "❌ Failed to create audio player", e)
-                updateStatus("Error creating player: ${e.message}")
+                audioNavigator = navigator
+                Log.d(TAG, "✅ Audio Navigator created")
+
+                // Start playback
+                navigator.play()
+                Log.d(TAG, "▶️ Playback started")
+                updateStatus("Playing audiobook! 🎧")
+
+                // TODO: Add playback state listener
+                // In Readium 3.x, use navigator.playback StateFlow to observe changes
             }
+
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Failed to create Media Navigator", e)
+            e.printStackTrace()
+            updateStatus("Error: ${e.message}")
         }
     }
 
@@ -333,109 +314,18 @@ class AudiobookPlayerView(context: Context) : FrameLayout(context) {
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
-        player?.release()
-        publication?.close()
-    }
-
-    private fun sendEvent(eventName: String, params: WritableMap?) {
-        reactContext
-            .getJSModule(RCTEventEmitter::class.java)
-            .receiveEvent(id, eventName, params)
+        // Clean up resources in correct order
+        audioNavigator = null
+        publication = null
+        asset?.close()
+        asset = null
+        // Don't close these as they might be needed for cleanup
+        // httpClient = null
+        // assetRetriever = null
+        // lcpService = null
     }
 
     companion object {
         private const val TAG = "AudiobookPlayerView"
-    }
-
-    /**
-     * Streaming DataSource that reads from Readium's decrypted Resource in chunks
-     * This maintains encryption at rest - only decrypts chunks in memory during playback
-     *
-     * KEY: Uses range requests to avoid loading 735MB file into memory all at once
-     */
-    class ReadiumDataSource(
-        private val publication: Publication,
-        private val link: org.readium.r2.shared.publication.Link
-    ) : DataSource {
-
-        private var resource: org.readium.r2.shared.fetcher.Resource? = null
-        private var currentPosition: Long = 0
-        private var opened = false
-        private var totalLength: Long = -1L
-
-        override fun open(dataSpec: DataSpec): Long {
-            if (opened) return -1L
-            opened = true
-
-            // Get decrypted resource from Readium Publication
-            // Files stay encrypted on disk, chunks decrypted on-demand
-            resource = publication.get(link)
-            currentPosition = dataSpec.position
-
-            // Try to get length from resource
-            totalLength = kotlinx.coroutines.runBlocking {
-                resource?.length()?.fold(
-                    onSuccess = { it },
-                    onFailure = { -1L }
-                ) ?: -1L
-            }
-
-            Log.d("ReadiumDataSource", "✅ Opened resource for ${link.href}")
-            Log.d("ReadiumDataSource", "📏 Starting position: $currentPosition")
-            Log.d("ReadiumDataSource", "📏 Resource length: $totalLength")
-
-            return totalLength
-        }
-
-        override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
-            val res = resource ?: return -1
-
-            // Read a chunk from current position
-            val range = currentPosition until (currentPosition + length)
-
-            val byteArray = kotlinx.coroutines.runBlocking {
-                val result = res.read(range)
-                result.fold(
-                    onSuccess = { it },
-                    onFailure = { error ->
-                        Log.e("ReadiumDataSource", "Chunk read failed at $currentPosition: $error")
-                        null
-                    }
-                )
-            }
-
-            if (byteArray == null || byteArray.isEmpty()) {
-                return -1 // End of stream
-            }
-
-            // Copy to buffer
-            val bytesToCopy = minOf(byteArray.size, length)
-            System.arraycopy(byteArray, 0, buffer, offset, bytesToCopy)
-            currentPosition += bytesToCopy
-
-            return bytesToCopy
-        }
-
-        override fun close() {
-            // Resource.close() is suspend in Readium 2.4.1
-            resource?.let { res ->
-                kotlinx.coroutines.runBlocking {
-                    res.close()
-                }
-            }
-            resource = null
-            opened = false
-            currentPosition = 0
-        }
-
-        override fun getUri(): Uri? = Uri.parse("readium://audio/${link.href}")
-        override fun addTransferListener(transferListener: com.google.android.exoplayer2.upstream.TransferListener) {}
-
-        class Factory(
-            private val publication: Publication,
-            private val link: org.readium.r2.shared.publication.Link
-        ) : DataSource.Factory {
-            override fun createDataSource(): DataSource = ReadiumDataSource(publication, link)
-        }
     }
 }

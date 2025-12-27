@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Default colors for Readium UI components -->
+    <color name="colorAccent">#c5b189</color>
+    <color name="colorPrimary">#192744</color>
+    <color name="colorPrimaryDark">#091e3d</color>
+</resources>

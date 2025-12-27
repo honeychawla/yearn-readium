@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import org.readium.r2.navigator.*
 import org.readium.r2.shared.publication.Locator
+import org.readium.r2.shared.publication.Publication
 import com.reactnativereadium.utils.EventChannel
 import kotlinx.coroutines.channels.Channel
 
@@ -17,7 +18,6 @@ import kotlinx.coroutines.channels.Channel
  *
  * Provides common menu items and saves last location on stop.
  */
-@OptIn(ExperimentalDecorator::class)
 abstract class BaseReaderFragment : Fragment() {
   val channel = EventChannel(
     Channel<ReaderViewModel.Event>(Channel.BUFFERED),
@@ -26,6 +26,10 @@ abstract class BaseReaderFragment : Fragment() {
 
   protected abstract val model: ReaderViewModel
   protected abstract val navigator: Navigator
+
+  // In Readium 3.x, get publication from model instead of navigator
+  protected val publication: Publication
+    get() = model.publication
 
   override fun onCreate(savedInstanceState: Bundle?) {
     setHasOptionsMenu(true)
@@ -53,7 +57,7 @@ abstract class BaseReaderFragment : Fragment() {
     var locator: Locator? = null
     when (location) {
       is LinkOrLocator.Link -> {
-        locator = navigator.publication.locatorFromLink(location.link)
+        locator = publication.locatorFromLink(location.link)
       }
       is LinkOrLocator.Locator -> {
         locator = location.locator
