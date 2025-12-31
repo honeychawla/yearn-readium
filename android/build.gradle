@@ -73,13 +73,13 @@ android {
 }
 
 repositories {
+  // Use flatDir for local AAR files
+  flatDir {
+    dirs "${projectDir}/local-maven/org/edrlab/liblcp/4.1.0"
+  }
+
   mavenCentral()
   google()
-
-  // Local libs directory for AAR files
-  flatDir {
-    dirs 'libs'
-  }
 
   // EDRLab LCP library repository
   ivy {
@@ -182,8 +182,8 @@ dependencies {
   implementation "org.readium.kotlin-toolkit:readium-adapter-exoplayer-audio:$readium_version"
 
   // EDRLab LCP Client library (contains liblcp.so native binaries)
-  // Using flatDir repository for AGP 8.x compatibility
-  implementation(name: 'liblcp-4.1.0', ext: 'aar')
+  // Using flatDir repository for better compatibility across environments
+  implementation(name: 'liblcp-4.1.0', ext: 'aar', group: null)
 
   // Media3 (AndroidX Media / ExoPlayer 3.x) for audio playback
   implementation "androidx.media3:media3-common:1.2.1"
